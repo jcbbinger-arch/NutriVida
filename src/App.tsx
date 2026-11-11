@@ -11,6 +11,7 @@ import { TrackingView } from './components/TrackingView';
 import { ExerciseInfographicsView } from './components/ExerciseInfographicsView';
 import { FitStudioEngineView } from './components/FitStudioEngineView';
 import { HomeLandingView } from './components/HomeLandingView';
+import { LoginPage } from './components/LoginPage';
 import { MealSwapModal } from './components/MealSwapModal';
 import { RecipeModal } from './components/RecipeModal';
 import { UserProfileModal } from './components/UserProfileModal';
@@ -36,6 +37,7 @@ export default function App() {
 
   // Firebase Auth user state
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(auth.currentUser);
+  const [isGuestMode, setIsGuestMode] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   useEffect(() => {
@@ -218,6 +220,11 @@ export default function App() {
     setPhysicalProfile(updated);
     showToast('Perfil físico y disponibilidad actualizados.');
   }, [showToast]);
+
+  // Mandatory Login Gate: Lock entire application until signed in with Google (or guest demo)
+  if (!currentUser && !isGuestMode) {
+    return <LoginPage onGuestAccess={() => setIsGuestMode(true)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-emerald-500 selection:text-white">
