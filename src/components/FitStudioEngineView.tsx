@@ -410,77 +410,89 @@ export const FitStudioEngineView: React.FC = () => {
     setVoiceSpokenPrompt('Entrenamiento detenido.');
   };
 
-  // 1-second countdown tick effect
+  // Step-by-step phase transition handler
+  const advanceExercisePhase = React.useCallback(() => {
+    setCurrentPhase((prevPhase) => {
+      if (prevPhase === 'prep') {
+        const eccentricSeconds = tempoCadence === '4-1-2' ? 4 : 3;
+        setPhaseSecondsLeft(eccentricSeconds);
+        fitStudioAudio.speak('Baja lento');
+        setVoiceSpokenPrompt(`Repetición ${currentRep + 1}: Baja en ${eccentricSeconds} segundos...`);
+        return 'eccentric';
+      }
+
+      if (prevPhase === 'eccentric') {
+        setPhaseSecondsLeft(1);
+        fitStudioAudio.playBeep(440, 0.1);
+        setVoiceSpokenPrompt('¡Pausa!');
+        return 'inflection';
+      }
+
+      if (prevPhase === 'inflection') {
+        const nextRep = currentRep + 1;
+        setCurrentRep(nextRep);
+        fitStudioAudio.playBeep(660, 0.18, 'triangle');
+
+        const isHalfway = nextRep === Math.floor(targetReps / 2);
+        const isFinalStretch = nextRep === targetReps - 1;
+        const isDone = nextRep >= targetReps;
+
+        let voiceMsg = `¡Arriba! Llevas ${nextRep}.`;
+        if (isDone) {
+          voiceMsg = `¡Serie completada! Llevas ${nextRep} repeticiones. Descansa 60 segundos.`;
+        } else if (isHalfway) {
+          voiceMsg = `¡Arriba! Llevas ${nextRep}. ¡Excelente ritmo, vas por la mitad! Mantén la técnica.`;
+        } else if (isFinalStretch) {
+          voiceMsg = `¡Arriba! Llevas ${nextRep}. ¡Última repetición, no aflojes!`;
+        }
+
+        setVoiceSpokenPrompt(voiceMsg);
+        fitStudioAudio.speak(voiceMsg);
+
+        if (isDone) {
+          setIsExerciseRunning(false);
+          setPhaseSecondsLeft(0);
+          return 'completed';
+        }
+
+        setPhaseSecondsLeft(1);
+        return 'concentric';
+      }
+
+      if (prevPhase === 'concentric') {
+        const eccentricSeconds = tempoCadence === '4-1-2' ? 4 : 3;
+        setPhaseSecondsLeft(eccentricSeconds);
+        return 'eccentric';
+      }
+
+      return prevPhase;
+    });
+  }, [currentRep, targetReps, tempoCadence]);
+
+  // Robust 1-second interval ticker (guaranteed no infinite loops)
   useEffect(() => {
     if (!isExerciseRunning || isExercisePaused) return;
 
     timerRef.current = setInterval(() => {
       setPhaseSecondsLeft((prevSec) => {
-        if (prevSec <= 1) {
-          return 0; // Signals transition needed
+        if (prevSec > 1) {
+          if (currentPhase === 'eccentric') {
+            fitStudioAudio.playBeep(330, 0.08);
+          }
+          return prevSec - 1;
         }
-        if (currentPhase === 'eccentric') {
-          fitStudioAudio.playBeep(330, 0.08);
-        }
-        return prevSec - 1;
+
+        setTimeout(() => {
+          advanceExercisePhase();
+        }, 0);
+        return 0;
       });
     }, 1000);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isExerciseRunning, isExercisePaused, currentPhase]);
-
-  // Phase transition effect triggered when phaseSecondsLeft reaches 0
-  useEffect(() => {
-    if (!isExerciseRunning || isExercisePaused) return;
-    if (phaseSecondsLeft > 0) return;
-
-    if (currentPhase === 'prep') {
-      setCurrentPhase('eccentric');
-      const eccentricSeconds = tempoCadence === '4-1-2' ? 4 : 3;
-      setPhaseSecondsLeft(eccentricSeconds);
-      fitStudioAudio.speak('Baja lento');
-      setVoiceSpokenPrompt(`Repetición ${currentRep + 1}: Baja en ${eccentricSeconds} segundos...`);
-    } else if (currentPhase === 'eccentric') {
-      setCurrentPhase('inflection');
-      setPhaseSecondsLeft(1);
-      fitStudioAudio.playBeep(440, 0.1);
-      setVoiceSpokenPrompt('¡Pausa!');
-    } else if (currentPhase === 'inflection') {
-      const nextRep = currentRep + 1;
-      setCurrentRep(nextRep);
-      fitStudioAudio.playBeep(660, 0.18, 'triangle');
-
-      const isHalfway = nextRep === Math.floor(targetReps / 2);
-      const isFinalStretch = nextRep === targetReps - 1;
-      const isDone = nextRep >= targetReps;
-
-      let voiceMsg = `¡Arriba! Llevas ${nextRep}.`;
-      if (isDone) {
-        voiceMsg = `¡Serie completada! Llevas ${nextRep} repeticiones. Descansa 60 segundos.`;
-      } else if (isHalfway) {
-        voiceMsg = `¡Arriba! Llevas ${nextRep}. ¡Excelente ritmo, vas por la mitad! Mantén la técnica.`;
-      } else if (isFinalStretch) {
-        voiceMsg = `¡Arriba! Llevas ${nextRep}. ¡Última repetición, no aflojes!`;
-      }
-
-      setVoiceSpokenPrompt(voiceMsg);
-      fitStudioAudio.speak(voiceMsg);
-
-      if (isDone) {
-        setCurrentPhase('completed');
-        setIsExerciseRunning(false);
-      } else {
-        setCurrentPhase('concentric');
-        setPhaseSecondsLeft(1);
-      }
-    } else if (currentPhase === 'concentric') {
-      setCurrentPhase('eccentric');
-      const eccentricSeconds = tempoCadence === '4-1-2' ? 4 : 3;
-      setPhaseSecondsLeft(eccentricSeconds);
-    }
-  }, [phaseSecondsLeft, isExerciseRunning, isExercisePaused, currentPhase, currentRep, targetReps, tempoCadence]);
+  }, [isExerciseRunning, isExercisePaused, currentPhase, advanceExercisePhase]);
 
   // ----------------------------------------------------
   // CONSOLE OUTPUT STATE (STRUCTURED DASHBOARD FORMAT)

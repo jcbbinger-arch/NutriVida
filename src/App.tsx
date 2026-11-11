@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { UserProfileBanner } from './components/UserProfileBanner';
 import { EngineStatusCard } from './components/EngineStatusCard';
@@ -35,17 +35,35 @@ export default function App() {
   // Navigation tab state: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'
   const [activeTab, setActiveTab] = useState<'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'>('home');
 
+  // Toast feedback state
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' } | null>({
+    text: 'Plan Integral NutriVida Activo: 5 tomas nutricionales con escandallo + Plan Físico corregido (+238m/-238m, bastones y fuerza excéntrica).',
+    type: 'success'
+  });
+
+  const showToast = useCallback((text: string, type: 'success' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage((prev) => (prev?.text === text ? null : prev));
+    }, 4500);
+  }, []);
+
   // Firebase Auth user state
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(auth.currentUser);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const prevUserRef = useRef<FirebaseUser | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      if (user && !prevUserRef.current) {
+        showToast(`Bienvenido, ${user.displayName || user.email}. Sincronizando con tu cuenta de Firebase.`);
+      }
+      prevUserRef.current = user;
       setCurrentUser(user);
     });
     return () => unsub();
-  }, []);
+  }, [showToast]);
 
   // Fortnight (2-week plan) state
   const [fortnight, setFortnight] = useState<FortnightPlan>(() => generateFortnightPlan());
@@ -92,18 +110,7 @@ export default function App() {
     mealTypeLabel: ''
   });
 
-  // Toast feedback state
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' } | null>({
-    text: 'Plan Integral NutriVida Activo: 5 tomas nutricionales con escandallo + Plan Físico corregido (+238m/-238m, bastones y fuerza excéntrica).',
-    type: 'success'
-  });
 
-  const showToast = useCallback((text: string, type: 'success' | 'info' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => {
-      setToastMessage((prev) => (prev?.text === text ? null : prev));
-    }, 4500);
-  }, []);
 
   // [ 🎲 Mezclar Menú de la Semana Activa ]
   const handleShuffleWeek = useCallback(() => {
@@ -415,11 +422,6 @@ export default function App() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onUserChanged={(user) => {
-          if (user) {
-            showToast(`Bienvenido, ${user.displayName || user.email}. Sincronizando con tu cuenta de Firebase.`);
-          }
-        }}
       />
     </div>
   );

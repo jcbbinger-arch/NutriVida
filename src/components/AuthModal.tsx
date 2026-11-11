@@ -17,10 +17,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onUserCha
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
-      if (onUserChanged) onUserChanged(user);
     });
     return () => unsub();
-  }, [onUserChanged]);
+  }, []);
 
   if (!isOpen) return null;
 
