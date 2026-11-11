@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   PlusCircle,
   History,
@@ -10,10 +10,16 @@ import {
   Info,
   Check,
   Download,
-  RotateCcw
+  RotateCcw,
+  Cloud
 } from 'lucide-react';
 import { TrackingEntry } from '../types/training';
 import { INITIAL_TRACKING_ENTRIES } from '../data/trainingDatabase';
+import {
+  subscribeMeasurements,
+  saveMeasurementToCloud,
+  deleteMeasurementFromCloud
+} from '../services/firebase';
 
 export const TrackingView: React.FC = () => {
   const [entries, setEntries] = useState<TrackingEntry[]>(() => {
@@ -28,6 +34,24 @@ export const TrackingView: React.FC = () => {
     }
     return INITIAL_TRACKING_ENTRIES;
   });
+
+  // Subscribe to real-time Cloud Firestore updates
+  useEffect(() => {
+    const unsubscribe = subscribeMeasurements('juan_fitstudio_user', (cloudEntries) => {
+      setEntries((prev) => {
+        // Merge or replace if cloud entries exist
+        const map = new Map<string, TrackingEntry>();
+        prev.forEach((item) => map.set(item.id, item));
+        cloudEntries.forEach((item) => map.set(item.id, item));
+        const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+        try {
+          localStorage.setItem('nutrivida_user_measurements', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Form states matching user screenshot exactly + Garmin steps
   const [formDate, setFormDate] = useState('2026-11-11');
@@ -97,12 +121,15 @@ export const TrackingView: React.FC = () => {
       // ignore
     }
 
+    // Persist to Cloud Firestore for cross-device sync
+    saveMeasurementToCloud(newEntry);
+
     // Reset inputs
     setFormWeight('');
     setFormWaist('');
     setFormSteps('8000');
     setFormNotes('');
-    showToast(`✓ Registro de ${formDate} guardado con éxito (${newEntry.weightKg} kg · ${newEntry.dailySteps} pasos).`);
+    showToast(`✓ Registro de ${formDate} guardado y sincronizado en Nube Firestore (${newEntry.weightKg} kg · ${newEntry.dailySteps} pasos).`);
   };
 
   const handleDeleteEntry = (id: string, date: string) => {
@@ -117,7 +144,9 @@ export const TrackingView: React.FC = () => {
     } catch {
       // ignore
     }
-    showToast(`Registro de ${date} eliminado.`);
+
+    deleteMeasurementFromCloud(id);
+    showToast(`Registro de ${date} eliminado de local y Nube Firestore.`);
   };
 
   const handleResetToBaseline = () => {

@@ -27,6 +27,12 @@ import {
 import { fitStudioAudio } from '../services/fitStudioAudio';
 import { ExerciseSvgInfographic } from './ExerciseSvgInfographic';
 import { EXERCISE_INFOGRAPHICS } from '../data/exerciseInfographics';
+import {
+  subscribeOutdoorRoutes,
+  saveOutdoorRouteToCloud,
+  subscribeEllipticalSessions,
+  saveEllipticalSessionToCloud
+} from '../services/firebase';
 
 // Closed bank of 12 authorized strength exercises
 export const AUTHORIZED_STRENGTH_EXERCISES = [
@@ -207,6 +213,8 @@ export const FitStudioEngineView: React.FC = () => {
       localStorage.setItem('fitstudio_outdoor_history', JSON.stringify(updated));
     } catch {}
 
+    saveOutdoorRouteToCloud(newSession);
+
     setConsoleOutput({
       toolName: 'registrarRutaExterior',
       status: 'EXITO',
@@ -239,6 +247,40 @@ export const FitStudioEngineView: React.FC = () => {
       }
     ];
   });
+
+  // Real-time Cloud Firestore Synchronization for Outdoor Routes & Elliptical Sessions
+  useEffect(() => {
+    const unsubOutdoor = subscribeOutdoorRoutes('juan_fitstudio_user', (cloudRoutes) => {
+      setRouteHistory((prev) => {
+        const map = new Map<string, OutdoorRouteSession>();
+        prev.forEach((r) => map.set(r.id, r));
+        cloudRoutes.forEach((r) => map.set(r.id, r));
+        const merged = Array.from(map.values());
+        try {
+          localStorage.setItem('fitstudio_outdoor_history', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
+    });
+
+    const unsubElliptical = subscribeEllipticalSessions('juan_fitstudio_user', (cloudSessions) => {
+      setEllipticalHistory((prev) => {
+        const map = new Map<string, EllipticalSession>();
+        prev.forEach((s) => map.set(s.id, s));
+        cloudSessions.forEach((s) => map.set(s.id, s));
+        const merged = Array.from(map.values());
+        try {
+          localStorage.setItem('fitstudio_elliptical_history', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
+    });
+
+    return () => {
+      unsubOutdoor();
+      unsubElliptical();
+    };
+  }, []);
 
   // Calculate calories strictly via formula: (Tiempo en min) * (Nivel Resistencia * 0.7 + 4)
   const liveEllipticalMetrics = React.useMemo(() => {
@@ -286,6 +328,8 @@ export const FitStudioEngineView: React.FC = () => {
     try {
       localStorage.setItem('fitstudio_elliptical_history', JSON.stringify(updated));
     } catch {}
+
+    saveEllipticalSessionToCloud(newSession);
 
     setConsoleOutput({
       toolName: 'registrarEliptica',

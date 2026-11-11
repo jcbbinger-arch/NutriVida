@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "user_profile": {
+      "title": "UserProfile",
+      "description": "Perfil clínico y metabólico del usuario",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "age": { "type": "number" },
+        "weightKg": { "type": "number" },
+        "heightCm": { "type": "number" },
+        "waistCircumferenceCm": { "type": "number" },
+        "targetCalories": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "age", "weightKg", "heightCm"]
+    },
+    "tracking_entry": {
+      "title": "TrackingEntry",
+      "description": "Registro periódico de peso, cintura y pasos Garmin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string" },
+        "weightKg": { "type": "number" },
+        "waistCircumferenceCm": { "type": "number" },
+        "dailySteps": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "date", "weightKg", "waistCircumferenceCm"]
+    },
+    "outdoor_route": {
+      "title": "OutdoorRoute",
+      "description": "Registro de ruta exterior (caminata o bicicleta)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "tipo": { "type": "string", "enum": ["Caminata", "Bicicleta"] },
+        "distancia_km": { "type": "number" },
+        "tiempo_minutos": { "type": "number" },
+        "altitud_m": { "type": "number" },
+        "desnivel_positivo_m": { "type": "number" },
+        "desnivel_negativo_m": { "type": "number" },
+        "ritmo_min_km": { "type": "string" },
+        "velocidad_kmh": { "type": "number" },
+        "esfuerzo_acumulado": { "type": "string" },
+        "heart_rate_avg_bpm": { "type": "number" },
+        "heart_rate_max_bpm": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "tipo", "distancia_km", "tiempo_minutos"]
+    },
+    "elliptical_session": {
+      "title": "EllipticalSession",
+      "description": "Sesión de ejercicio en máquina elíptica",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "tiempo_minutos": { "type": "number" },
+        "nivel_resistencia": { "type": "number" },
+        "rpm_promedio": { "type": "number" },
+        "calorias_estimadas": { "type": "number" },
+        "zona_intensidad": { "type": "string" },
+        "heart_rate_avg_bpm": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "tiempo_minutos", "nivel_resistencia"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user_profile",
+      "description": "Perfil de usuario"
+    },
+    "/users/{userId}/measurements/{measurementId}": {
+      "schema": "tracking_entry",
+      "description": "Histórico de peso y cintura"
+    },
+    "/users/{userId}/outdoor_routes/{routeId}": {
+      "schema": "outdoor_route",
+      "description": "Histórico de rutas exteriores"
+    },
+    "/users/{userId}/elliptical_sessions/{sessionId}": {
+      "schema": "elliptical_session",
+      "description": "Histórico de elíptica"
+    }
+  }
+}
