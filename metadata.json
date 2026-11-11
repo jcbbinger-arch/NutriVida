@@ -1,0 +1,6 @@
+{
+  "name": "NutriVida - Generador de Planes Nutricionales",
+  "description": "Motor interactivo de planificación nutricional semanal con rotación aleatoria inteligente, balance de macronutrientes y lista de compra automática.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
