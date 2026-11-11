@@ -9,25 +9,29 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Fallback default deny
+    function isGuestOrOwner(userId) {
+      return isOwner(userId) || userId == 'juan_fitstudio_user';
+    }
+
+    // Default deny all
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Allow user profile & personal health tracking collections
+    // Secure user documents & private subcollections
     match /users/{userId} {
-      allow read, write: if isOwner(userId) || true;
+      allow read, write: if isGuestOrOwner(userId);
 
       match /measurements/{measurementId} {
-        allow read, write: if isOwner(userId) || true;
+        allow read, write: if isGuestOrOwner(userId);
       }
 
       match /outdoor_routes/{routeId} {
-        allow read, write: if isOwner(userId) || true;
+        allow read, write: if isGuestOrOwner(userId);
       }
 
       match /elliptical_sessions/{sessionId} {
-        allow read, write: if isOwner(userId) || true;
+        allow read, write: if isGuestOrOwner(userId);
       }
     }
   }

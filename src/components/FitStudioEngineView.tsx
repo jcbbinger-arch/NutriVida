@@ -250,7 +250,8 @@ export const FitStudioEngineView: React.FC = () => {
 
   // Real-time Cloud Firestore Synchronization for Outdoor Routes & Elliptical Sessions
   useEffect(() => {
-    const unsubOutdoor = subscribeOutdoorRoutes('juan_fitstudio_user', (cloudRoutes) => {
+    const unsubOutdoor = subscribeOutdoorRoutes(undefined, (cloudRoutes) => {
+      if (!cloudRoutes || cloudRoutes.length === 0) return;
       setRouteHistory((prev) => {
         const map = new Map<string, OutdoorRouteSession>();
         prev.forEach((r) => map.set(r.id, r));
@@ -263,7 +264,8 @@ export const FitStudioEngineView: React.FC = () => {
       });
     });
 
-    const unsubElliptical = subscribeEllipticalSessions('juan_fitstudio_user', (cloudSessions) => {
+    const unsubElliptical = subscribeEllipticalSessions(undefined, (cloudSessions) => {
+      if (!cloudSessions || cloudSessions.length === 0) return;
       setEllipticalHistory((prev) => {
         const map = new Map<string, EllipticalSession>();
         prev.forEach((s) => map.set(s.id, s));

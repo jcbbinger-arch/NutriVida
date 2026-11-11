@@ -37,9 +37,9 @@ export const TrackingView: React.FC = () => {
 
   // Subscribe to real-time Cloud Firestore updates
   useEffect(() => {
-    const unsubscribe = subscribeMeasurements('juan_fitstudio_user', (cloudEntries) => {
+    const unsubscribe = subscribeMeasurements(undefined, (cloudEntries) => {
+      if (!cloudEntries || cloudEntries.length === 0) return;
       setEntries((prev) => {
-        // Merge or replace if cloud entries exist
         const map = new Map<string, TrackingEntry>();
         prev.forEach((item) => map.set(item.id, item));
         cloudEntries.forEach((item) => map.set(item.id, item));

@@ -9,8 +9,7 @@ import {
   setDoc,
   deleteDoc,
   query,
-  orderBy,
-  getDocs
+  orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { TrackingEntry } from '../types/training';
@@ -24,28 +23,68 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error Details: ', JSON.stringify(errInfo));
+}
+
+// Get current active user ID or default guest ID
+export function getEffectiveUserId(): string {
+  return auth.currentUser ? auth.currentUser.uid : 'juan_fitstudio_user';
+}
+
 // Test server connection as per skill instructions
 export async function testFirebaseConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, '_connection_test', 'status'));
     return true;
   } catch (error) {
-    console.log('Firebase connection initialized:', error);
+    console.log('Firebase connection status checked.');
     return true;
   }
 }
-
-// Default UserId if not signed in (for seamless local/cloud fallback)
-const DEFAULT_USER_ID = 'juan_fitstudio_user';
 
 // ================================================
 // REAL-TIME SYNC: MEASUREMENTS (WEIGHT, WAIST, STEPS)
 // ================================================
 export function subscribeMeasurements(
-  userId: string = DEFAULT_USER_ID,
-  callback: (entries: TrackingEntry[]) => void
+  userId?: string,
+  callback?: (entries: TrackingEntry[]) => void
 ) {
-  const colRef = collection(db, 'users', userId, 'measurements');
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/measurements`;
+  const colRef = collection(db, 'users', targetUid, 'measurements');
   const q = query(colRef, orderBy('date', 'asc'));
 
   return onSnapshot(
@@ -55,37 +94,41 @@ export function subscribeMeasurements(
       snapshot.forEach((docSnap) => {
         items.push(docSnap.data() as TrackingEntry);
       });
-      if (items.length > 0) {
+      if (callback) {
         callback(items);
       }
     },
     (error) => {
-      console.error('Firestore Measurements Error:', error);
+      handleFirestoreError(error, OperationType.LIST, path);
     }
   );
 }
 
 export async function saveMeasurementToCloud(
   entry: TrackingEntry,
-  userId: string = DEFAULT_USER_ID
+  userId?: string
 ) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/measurements/${entry.id}`;
   try {
-    const docRef = doc(db, 'users', userId, 'measurements', entry.id);
+    const docRef = doc(db, 'users', targetUid, 'measurements', entry.id);
     await setDoc(docRef, entry, { merge: true });
   } catch (error) {
-    console.error('Error saving measurement to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteMeasurementFromCloud(
   entryId: string,
-  userId: string = DEFAULT_USER_ID
+  userId?: string
 ) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/measurements/${entryId}`;
   try {
-    const docRef = doc(db, 'users', userId, 'measurements', entryId);
+    const docRef = doc(db, 'users', targetUid, 'measurements', entryId);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting measurement from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -93,10 +136,12 @@ export async function deleteMeasurementFromCloud(
 // REAL-TIME SYNC: OUTDOOR ROUTES
 // ================================================
 export function subscribeOutdoorRoutes(
-  userId: string = DEFAULT_USER_ID,
-  callback: (routes: OutdoorRouteSession[]) => void
+  userId?: string,
+  callback?: (routes: OutdoorRouteSession[]) => void
 ) {
-  const colRef = collection(db, 'users', userId, 'outdoor_routes');
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/outdoor_routes`;
+  const colRef = collection(db, 'users', targetUid, 'outdoor_routes');
 
   return onSnapshot(
     colRef,
@@ -105,25 +150,27 @@ export function subscribeOutdoorRoutes(
       snapshot.forEach((docSnap) => {
         items.push(docSnap.data() as OutdoorRouteSession);
       });
-      if (items.length > 0) {
+      if (callback) {
         callback(items);
       }
     },
     (error) => {
-      console.error('Firestore Outdoor Routes Error:', error);
+      handleFirestoreError(error, OperationType.LIST, path);
     }
   );
 }
 
 export async function saveOutdoorRouteToCloud(
   route: OutdoorRouteSession,
-  userId: string = DEFAULT_USER_ID
+  userId?: string
 ) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/outdoor_routes/${route.id}`;
   try {
-    const docRef = doc(db, 'users', userId, 'outdoor_routes', route.id);
+    const docRef = doc(db, 'users', targetUid, 'outdoor_routes', route.id);
     await setDoc(docRef, route, { merge: true });
   } catch (error) {
-    console.error('Error saving outdoor route to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
@@ -131,10 +178,12 @@ export async function saveOutdoorRouteToCloud(
 // REAL-TIME SYNC: ELLIPTICAL SESSIONS
 // ================================================
 export function subscribeEllipticalSessions(
-  userId: string = DEFAULT_USER_ID,
-  callback: (sessions: EllipticalSession[]) => void
+  userId?: string,
+  callback?: (sessions: EllipticalSession[]) => void
 ) {
-  const colRef = collection(db, 'users', userId, 'elliptical_sessions');
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/elliptical_sessions`;
+  const colRef = collection(db, 'users', targetUid, 'elliptical_sessions');
 
   return onSnapshot(
     colRef,
@@ -143,25 +192,27 @@ export function subscribeEllipticalSessions(
       snapshot.forEach((docSnap) => {
         items.push(docSnap.data() as EllipticalSession);
       });
-      if (items.length > 0) {
+      if (callback) {
         callback(items);
       }
     },
     (error) => {
-      console.error('Firestore Elliptical Sessions Error:', error);
+      handleFirestoreError(error, OperationType.LIST, path);
     }
   );
 }
 
 export async function saveEllipticalSessionToCloud(
   session: EllipticalSession,
-  userId: string = DEFAULT_USER_ID
+  userId?: string
 ) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/elliptical_sessions/${session.id}`;
   try {
-    const docRef = doc(db, 'users', userId, 'elliptical_sessions', session.id);
+    const docRef = doc(db, 'users', targetUid, 'elliptical_sessions', session.id);
     await setDoc(docRef, session, { merge: true });
   } catch (error) {
-    console.error('Error saving elliptical session to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
