@@ -11,18 +11,22 @@ import {
   Activity,
   LineChart,
   Dumbbell,
-  Zap
+  Zap,
+  Home
 } from 'lucide-react';
 import { UserProfile, RuleValidationReport } from '../types/nutrition';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderProps {
   userProfile: UserProfile;
   validationReport: RuleValidationReport;
   activeWeek: 1 | 2;
   onChangeWeek: (week: 1 | 2) => void;
-  activeTab: 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics';
-  onChangeTab: (tab: 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics') => void;
+  activeTab: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics';
+  onChangeTab: (tab: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics') => void;
   onOpenProfile: () => void;
+  onOpenAuth: () => void;
+  currentUser: FirebaseUser | null;
   onPrint: () => void;
   onShare: () => void;
 }
@@ -35,6 +39,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onChangeTab,
   onOpenProfile,
+  onOpenAuth,
+  currentUser,
   onPrint,
   onShare
 }) => {
@@ -66,6 +72,24 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Quick Controls */}
           <div className="flex items-center gap-2 flex-wrap justify-between md:justify-end">
+            {/* Login / Auth Button */}
+            <button
+              onClick={onOpenAuth}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-extrabold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-all cursor-pointer border border-slate-800"
+              title="Iniciar sesión con Google o cambiar de cuenta"
+            >
+              {currentUser?.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'Usuario'}
+                  className="w-4 h-4 rounded-full border border-teal-400"
+                />
+              ) : (
+                <User className="w-3.5 h-3.5 text-teal-400" />
+              )}
+              <span>{currentUser ? currentUser.displayName?.split(' ')[0] || 'Mi Cuenta' : 'Iniciar Sesión'}</span>
+            </button>
+
             {/* Week 1 / Week 2 selector */}
             <div className="bg-slate-100 p-0.5 rounded-xl flex items-center border border-slate-200/80 text-xs">
               <button
@@ -123,6 +147,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Bottom row: Primary Navigation Tabs */}
         <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-100 overflow-x-auto text-xs">
+          <button
+            onClick={() => onChangeTab('home')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-extrabold transition-all shrink-0 cursor-pointer ${
+              activeTab === 'home'
+                ? 'bg-slate-900 text-white shadow-md ring-2 ring-slate-900/30'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5 text-teal-400" />
+            <span>Inicio / Presentación</span>
+          </button>
+
           <button
             onClick={() => onChangeTab('fitstudio')}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-extrabold transition-all shrink-0 cursor-pointer ${

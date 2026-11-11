@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
 import { UserProfileBanner } from './components/UserProfileBanner';
 import { EngineStatusCard } from './components/EngineStatusCard';
@@ -10,10 +10,14 @@ import { TrainingView } from './components/TrainingView';
 import { TrackingView } from './components/TrackingView';
 import { ExerciseInfographicsView } from './components/ExerciseInfographicsView';
 import { FitStudioEngineView } from './components/FitStudioEngineView';
+import { HomeLandingView } from './components/HomeLandingView';
 import { MealSwapModal } from './components/MealSwapModal';
 import { RecipeModal } from './components/RecipeModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { DaySelectorModal } from './components/DaySelectorModal';
+import { AuthModal } from './components/AuthModal';
+import { auth } from './services/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import {
   generateFortnightPlan,
   generateWeeklyPlan,
@@ -27,8 +31,19 @@ import { PhysicalProfile } from './types/training';
 import { Check } from 'lucide-react';
 
 export default function App() {
-  // Navigation tab state: 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'
-  const [activeTab, setActiveTab] = useState<'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'>('fitstudio');
+  // Navigation tab state: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'
+  const [activeTab, setActiveTab] = useState<'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics'>('home');
+
+  // Firebase Auth user state
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(auth.currentUser);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
 
   // Fortnight (2-week plan) state
   const [fortnight, setFortnight] = useState<FortnightPlan>(() => generateFortnightPlan());
@@ -240,13 +255,24 @@ export default function App() {
           setActiveTab(tab);
         }}
         onOpenProfile={() => setIsProfileModalOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        currentUser={currentUser}
         onPrint={handlePrint}
         onShare={handleShare}
       />
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 flex-1 w-full">
-        {/* TAB 0: FITSTUDIO ENGINE (VIRTUAL TRAINER & DASHBOARD) */}
+        {/* TAB 0: HOME LANDING VIEW */}
+        {activeTab === 'home' && (
+          <HomeLandingView
+            onNavigateTab={setActiveTab}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+            currentUser={currentUser}
+          />
+        )}
+
+        {/* TAB 1: FITSTUDIO ENGINE (VIRTUAL TRAINER & DASHBOARD) */}
         {activeTab === 'fitstudio' && (
           <FitStudioEngineView />
         )}
@@ -377,6 +403,16 @@ export default function App() {
           });
         }}
         onDirectRegenerateDay={handleRegenerateDay}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onUserChanged={(user) => {
+          if (user) {
+            showToast(`Bienvenido, ${user.displayName || user.email}. Sincronizando con tu cuenta de Firebase.`);
+          }
+        }}
       />
     </div>
   );
