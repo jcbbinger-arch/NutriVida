@@ -44,6 +44,9 @@ export const TrackingView: React.FC = () => {
         prev.forEach((item) => map.set(item.id, item));
         cloudEntries.forEach((item) => map.set(item.id, item));
         const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+        if (prev.length === merged.length && prev.every((item, idx) => item.id === merged[idx]?.id && item.weightKg === merged[idx]?.weightKg && item.waistCircumferenceCm === merged[idx]?.waistCircumferenceCm)) {
+          return prev;
+        }
         try {
           localStorage.setItem('nutrivida_user_measurements', JSON.stringify(merged));
         } catch {}
