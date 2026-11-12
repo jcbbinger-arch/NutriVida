@@ -63,6 +63,7 @@ export interface OutdoorRouteSession {
   tipo: 'Caminata' | 'Bicicleta';
   distancia_km: number;
   tiempo_minutos: number;
+  tiempo_formato?: string;
   altitud_m?: number;
   desnivel_positivo_m: number;
   desnivel_negativo_m: number;
@@ -78,6 +79,7 @@ export interface EllipticalSession {
   id: string;
   timestamp: string;
   tiempo_minutos: number;
+  tiempo_formato?: string;
   nivel_resistencia: number; // 1-10
   rpm_promedio: number;
   calorias_estimadas: number;
@@ -86,6 +88,48 @@ export interface EllipticalSession {
   garmin_synced?: boolean;
 }
 
+// Helper to parse time in various formats: "1:15:23", "01:15:23", "75:23", "103", "103 min", "1:15"
+export function parseTimeToMinutes(raw: string | number): number {
+  if (typeof raw === 'number') return raw;
+  if (!raw) return 0;
+  const clean = String(raw).trim().toLowerCase().replace('min', '').replace('m', '').trim();
+  if (clean.includes(':')) {
+    const parts = clean.split(':').map((p) => parseFloat(p.trim().replace(',', '.')));
+    if (parts.length === 3) {
+      // hh:mm:ss -> e.g. 1:15:23 -> 1*60 + 15 + 23/60 = 75.3833 min
+      const [h, m, s] = parts;
+      if (isNaN(h) || isNaN(m) || isNaN(s)) return 0;
+      return h * 60 + m + s / 60;
+    }
+    if (parts.length === 2) {
+      const [p1, p2] = parts;
+      if (isNaN(p1) || isNaN(p2)) return 0;
+      if (p1 > 12) {
+        // mm:ss -> e.g. 75:23 -> 75 min + 23 sec
+        return p1 + p2 / 60;
+      } else {
+        // hh:mm -> e.g. 1:15 -> 1h 15m = 75 min
+        return p1 * 60 + p2;
+      }
+    }
+  }
+  const parsed = parseFloat(clean.replace(',', '.'));
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+// Format minutes into Garmin watch display e.g. "1:15:23 min" or "0:45:00 min"
+export function formatMinutesToGarminTime(totalMinutes: number): string {
+  if (!totalMinutes || isNaN(totalMinutes) || totalMinutes <= 0) return '0:00:00 min';
+  const totalSeconds = Math.round(totalMinutes * 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  if (hours > 0) {
+    return `${hours}:${pad(mins)}:${pad(secs)} min`;
+  }
+  return `0:${pad(mins)}:${pad(secs)} min`;
+}
 
 export interface StrengthSetLog {
   id: string;
@@ -108,7 +152,7 @@ export const FitStudioEngineView: React.FC = () => {
   // ----------------------------------------------------
   const [routeType, setRouteType] = useState<'Caminata' | 'Bicicleta'>('Caminata');
   const [routeDistance, setRouteDistance] = useState('6.9');
-  const [routeTime, setRouteTime] = useState('75');
+  const [routeTime, setRouteTime] = useState('1:15:23');
   const [routeAltitude, setRouteAltitude] = useState('312');
   const [routeElevGain, setRouteElevGain] = useState('238');
   const [routeElevLoss, setRouteElevLoss] = useState('238');
@@ -121,10 +165,11 @@ export const FitStudioEngineView: React.FC = () => {
     setIsSyncingGarminDevice(true);
     setTimeout(() => {
       setIsSyncingGarminDevice(false);
+      setRouteTime('1:15:23');
       setRouteHeartRateAvg(String(Math.floor(Math.random() * 10) + 120));
       setRouteHeartRateMax(String(Math.floor(Math.random() * 12) + 138));
       setEllipticalHeartRateAvg(String(Math.floor(Math.random() * 10) + 125));
-      fitStudioAudio.speak('Reloj Garmin sincronizado. Frecuencia cardíaca y datos actualizados.');
+      fitStudioAudio.speak('Reloj Garmin sincronizado. Tiempo 1:15:23 min, frecuencia cardíaca y datos actualizados.');
     }, 800);
   };
 
@@ -140,12 +185,13 @@ export const FitStudioEngineView: React.FC = () => {
         timestamp: '11 nov 2026 09:30',
         tipo: 'Caminata',
         distancia_km: 6.9,
-        tiempo_minutos: 75,
+        tiempo_minutos: 75.38,
+        tiempo_formato: '1:15:23 min',
         altitud_m: 312,
         desnivel_positivo_m: 238,
         desnivel_negativo_m: 238,
-        ritmo_min_km: '10:52',
-        velocidad_kmh: 5.52,
+        ritmo_min_km: '10:55',
+        velocidad_kmh: 5.49,
         esfuerzo_acumulado: 'Moderado Alto (+238m desnivel)'
       }
     ];
@@ -153,13 +199,21 @@ export const FitStudioEngineView: React.FC = () => {
 
   // Calculate live outdoor metrics
   const liveOutdoorMetrics = React.useMemo(() => {
-    const dist = parseFloat(routeDistance) || 0;
-    const time = parseFloat(routeTime) || 0;
-    const gain = parseFloat(routeElevGain) || 0;
-    const loss = parseFloat(routeElevLoss) || 0;
+    const dist = parseFloat(String(routeDistance).replace(',', '.')) || 0;
+    const time = parseTimeToMinutes(routeTime);
+    const gain = parseFloat(String(routeElevGain).replace(',', '.')) || 0;
+    const loss = parseFloat(String(routeElevLoss).replace(',', '.')) || 0;
+
+    const formattedTime = formatMinutesToGarminTime(time);
 
     if (dist <= 0 || time <= 0) {
-      return { ritmo: '—', velocidadKmh: 0, esfuerzo: 'Pendiente de datos' };
+      return {
+        ritmo: '—',
+        velocidadKmh: 0,
+        esfuerzo: 'Pendiente de datos',
+        tiempoFormateado: formattedTime,
+        tiempoMinutos: time
+      };
     }
 
     const paceDecimal = time / dist;
@@ -175,27 +229,32 @@ export const FitStudioEngineView: React.FC = () => {
     return {
       ritmo: ritmoStr,
       velocidadKmh: velocidad,
-      esfuerzo
+      esfuerzo,
+      tiempoFormateado: formattedTime,
+      tiempoMinutos: time
     };
   }, [routeDistance, routeTime, routeElevGain, routeElevLoss]);
 
   // Handle register outdoor route tool
   const handleRegisterOutdoorRoute = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const dist = parseFloat(routeDistance);
-    const time = parseFloat(routeTime);
-    const alt = parseFloat(routeAltitude) || 0;
-    const gain = parseFloat(routeElevGain) || 0;
-    const loss = parseFloat(routeElevLoss) || 0;
+    const dist = parseFloat(String(routeDistance).replace(',', '.'));
+    const time = parseTimeToMinutes(routeTime);
+    const alt = parseFloat(String(routeAltitude).replace(',', '.')) || 0;
+    const gain = parseFloat(String(routeElevGain).replace(',', '.')) || 0;
+    const loss = parseFloat(String(routeElevLoss).replace(',', '.')) || 0;
 
     if (isNaN(dist) || isNaN(time) || dist <= 0 || time <= 0) return;
+
+    const formattedTime = formatMinutesToGarminTime(time);
 
     const newSession: OutdoorRouteSession = {
       id: `out-${Date.now()}`,
       timestamp: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
       tipo: routeType,
       distancia_km: dist,
-      tiempo_minutos: time,
+      tiempo_minutos: Math.round(time * 100) / 100,
+      tiempo_formato: formattedTime,
       altitud_m: alt,
       desnivel_positivo_m: gain,
       desnivel_negativo_m: loss,
@@ -292,7 +351,7 @@ export const FitStudioEngineView: React.FC = () => {
 
   // Calculate calories strictly via formula: (Tiempo en min) * (Nivel Resistencia * 0.7 + 4)
   const liveEllipticalMetrics = React.useMemo(() => {
-    const time = parseFloat(ellipticalTime) || 0;
+    const time = parseTimeToMinutes(ellipticalTime);
     const res = parseFloat(ellipticalResistance) || 1;
     const rpm = parseFloat(ellipticalRpm) || 0;
 
@@ -305,13 +364,14 @@ export const FitStudioEngineView: React.FC = () => {
     return {
       calorias: calories,
       factorFormula: (res * 0.7 + 4).toFixed(2),
-      zona
+      zona,
+      tiempoFormateado: formatMinutesToGarminTime(time)
     };
   }, [ellipticalTime, ellipticalResistance, ellipticalRpm]);
 
   const handleRegisterElliptical = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const time = parseFloat(ellipticalTime);
+    const time = parseTimeToMinutes(ellipticalTime);
     const res = parseInt(ellipticalResistance);
     const rpm = parseFloat(ellipticalRpm) || 60;
 
@@ -322,7 +382,8 @@ export const FitStudioEngineView: React.FC = () => {
     const newSession: EllipticalSession = {
       id: `elp-${Date.now()}`,
       timestamp: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-      tiempo_minutos: time,
+      tiempo_minutos: Math.round(time * 100) / 100,
+      tiempo_formato: formatMinutesToGarminTime(time),
       nivel_resistencia: res,
       rpm_promedio: rpm,
       calorias_estimadas: calories,
@@ -1010,34 +1071,45 @@ export const FitStudioEngineView: React.FC = () => {
               </div>
 
               {/* Distance and Time */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">
                     Distancia (km):
                   </label>
                   <input
-                    type="number"
-                    step="0.1"
+                    type="text"
                     value={routeDistance}
                     onChange={(e) => setRouteDistance(e.target.value)}
-                    placeholder="Ej. 6.9"
+                    placeholder="Ej. 6,74 o 6.9"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
                     required
                   />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Admite decimales con coma o punto (ej. 6,74)
+                  </span>
                 </div>
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">
-                    Tiempo (minutos):
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700 block">
+                      Tiempo (ej. 1:15:23 min):
+                    </label>
+                    {routeTime && (
+                      <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
+                        ⏱️ {liveOutdoorMetrics.tiempoFormateado}
+                      </span>
+                    )}
+                  </div>
                   <input
-                    type="number"
-                    step="1"
+                    type="text"
                     value={routeTime}
                     onChange={(e) => setRouteTime(e.target.value)}
-                    placeholder="Ej. 75"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                    placeholder="Ej. 1:15:23 o 103"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
                     required
                   />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Formato reloj Garmin (<strong>1:15:23 min</strong>) o minutos (<strong>103</strong>).
+                  </span>
                 </div>
               </div>
 
@@ -1120,17 +1192,26 @@ export const FitStudioEngineView: React.FC = () => {
 
               {/* Live Auto Calculation Card */}
               <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80 space-y-1.5">
-                <span className="font-bold text-emerald-950 block text-[11px] uppercase tracking-wider">
-                  Cálculo Automático Instantáneo:
-                </span>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-emerald-950 block text-[11px] uppercase tracking-wider">
+                    Cálculo Automático Instantáneo:
+                  </span>
+                  <span className="text-[10px] text-emerald-800 font-bold bg-emerald-200/60 px-2 py-0.5 rounded-full">
+                    Garmin 735XT Calibrado
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
+                    <span className="text-slate-500 text-[10px] block">Tiempo Garmin:</span>
+                    <strong className="text-emerald-900 font-mono text-xs sm:text-sm">{liveOutdoorMetrics.tiempoFormateado}</strong>
+                  </div>
                   <div className="bg-white p-2 rounded-xl border border-emerald-100">
                     <span className="text-slate-500 text-[10px] block">Ritmo Medio:</span>
-                    <strong className="text-slate-900 font-mono text-sm">{liveOutdoorMetrics.ritmo}</strong>
+                    <strong className="text-slate-900 font-mono text-xs sm:text-sm">{liveOutdoorMetrics.ritmo}</strong>
                   </div>
                   <div className="bg-white p-2 rounded-xl border border-emerald-100">
                     <span className="text-slate-500 text-[10px] block">Velocidad Media:</span>
-                    <strong className="text-emerald-800 font-mono text-sm">{liveOutdoorMetrics.velocidadKmh} km/h</strong>
+                    <strong className="text-emerald-800 font-mono text-xs sm:text-sm">{liveOutdoorMetrics.velocidadKmh} km/h</strong>
                   </div>
                 </div>
                 <div className="text-[11px] text-emerald-900 pt-0.5">
@@ -1182,8 +1263,10 @@ export const FitStudioEngineView: React.FC = () => {
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
                     <div>
-                      <span className="text-slate-400 block text-[10px]">Tiempo</span>
-                      <strong className="text-slate-800">{item.tiempo_minutos} min</strong>
+                      <span className="text-slate-400 block text-[10px]">Tiempo (Garmin)</span>
+                      <strong className="text-slate-800 font-mono">
+                        {item.tiempo_formato || formatMinutesToGarminTime(item.tiempo_minutos)}
+                      </strong>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[10px]">Ritmo</span>
@@ -1265,18 +1348,27 @@ export const FitStudioEngineView: React.FC = () => {
             <form onSubmit={handleRegisterElliptical} className="space-y-4 text-xs">
               {/* Tiempo */}
               <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  Tiempo Transcurrido (minutos):
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700 block">
+                    Tiempo Transcurrido (ej. 1:15:23 min):
+                  </label>
+                  {ellipticalTime && (
+                    <span className="text-[10px] font-mono font-bold text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded-md border border-blue-300">
+                      ⏱️ {liveEllipticalMetrics.tiempoFormateado}
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="number"
-                  step="1"
+                  type="text"
                   value={ellipticalTime}
                   onChange={(e) => setEllipticalTime(e.target.value)}
-                  placeholder="Ej. 45"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-blue-600 focus:outline-hidden"
+                  placeholder="Ej. 1:15:23 o 45"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-blue-600 focus:outline-hidden font-mono"
                   required
                 />
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  Admite formato reloj Garmin (<strong>1:15:23 min</strong>) o minutos directos (<strong>45</strong>).
+                </span>
               </div>
 
               {/* Heart Rate Avg (Garmin 735XT Extra) */}
@@ -1349,7 +1441,7 @@ export const FitStudioEngineView: React.FC = () => {
                     Kcal = (Tiempo) × (Nivel Resistencia × 0.7 + 4)
                   </div>
                   <div className="text-blue-900 font-bold">
-                    Kcal = ({ellipticalTime} min) × ({ellipticalResistance} × 0.7 + 4) = <strong>{liveEllipticalMetrics.calorias} kcal</strong>
+                    Kcal = ({liveEllipticalMetrics.tiempoFormateado}) × ({ellipticalResistance} × 0.7 + 4) = <strong>{liveEllipticalMetrics.calorias} kcal</strong>
                   </div>
                 </div>
                 <div className="text-[11px] text-blue-900 font-semibold pt-1">
@@ -1404,8 +1496,10 @@ export const FitStudioEngineView: React.FC = () => {
 
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
                     <div>
-                      <span className="text-slate-400 block text-[10px]">Tiempo</span>
-                      <strong className="text-slate-800">{item.tiempo_minutos} min</strong>
+                      <span className="text-slate-400 block text-[10px]">Tiempo (Garmin)</span>
+                      <strong className="text-slate-800 font-mono">
+                        {item.tiempo_formato || formatMinutesToGarminTime(item.tiempo_minutos)}
+                      </strong>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[10px]">Resistencia</span>
