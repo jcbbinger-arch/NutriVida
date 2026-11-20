@@ -9,10 +9,19 @@
 }
 
 @media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background-color: #ffffff !important;
+  }
   .no-print {
     display: none !important;
   }
   .print-only {
     display: block !important;
+  }
+  .print-page-break {
+    page-break-after: always;
+    break-after: page;
   }
 }

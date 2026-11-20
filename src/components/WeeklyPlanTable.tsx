@@ -12,7 +12,8 @@ import {
   Sunrise,
   Cookie,
   Heart,
-  Zap
+  Zap,
+  Printer
 } from 'lucide-react';
 import { isOilyFishMeal, isLegumeMeal } from '../services/mealEngine';
 
@@ -25,6 +26,8 @@ interface WeeklyPlanTableProps {
   onSwapMeal: (dayId: string, mealType: 'breakfast' | 'morning' | 'lunch' | 'snack' | 'dinner') => void;
   onOpenMealDetail: (meal: MealOption, dayName: string, mealTypeLabel: string) => void;
   onToggleHardTraining: (dayId: string) => void;
+  onPrintDietMiniWeek?: () => void;
+  onPrintDietMini4Weeks?: () => void;
 }
 
 export const WeeklyPlanTable: React.FC<WeeklyPlanTableProps> = ({
@@ -35,7 +38,9 @@ export const WeeklyPlanTable: React.FC<WeeklyPlanTableProps> = ({
   onSwapDay,
   onSwapMeal,
   onOpenMealDetail,
-  onToggleHardTraining
+  onToggleHardTraining,
+  onPrintDietMiniWeek,
+  onPrintDietMini4Weeks
 }) => {
   const getCategoryBadgeClass = (category: string) => {
     if (category.includes('Comida Libre')) {
@@ -94,9 +99,29 @@ export const WeeklyPlanTable: React.FC<WeeklyPlanTableProps> = ({
           </p>
         </div>
 
-        <div className="text-xs text-slate-500 flex items-center gap-2">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" />
-          <span>Haz clic en 🔄 para ver tus 2 alternativas directas (&ldquo;Si no te gusta&rdquo;)</span>
+        <div className="flex items-center gap-2 flex-wrap print:hidden">
+          {onPrintDietMiniWeek && (
+            <button
+              type="button"
+              onClick={onPrintDietMiniWeek}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition-colors cursor-pointer"
+              title="Imprimir la dieta de esta semana en formato mini de bolsillo para llevar en la mano"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Dieta Mini ({activeWeekNumber === 5 ? 'D29–30' : `S${activeWeekNumber}`})</span>
+            </button>
+          )}
+          {onPrintDietMini4Weeks && (
+            <button
+              type="button"
+              onClick={onPrintDietMini4Weeks}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer"
+              title="Imprimir las 4 semanas en formato mini de bolsillo: 4 hojas distintas (1 semana por hoja)"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Dieta Mini 4 Semanas (4 Hojas)</span>
+            </button>
+          )}
         </div>
       </div>
 

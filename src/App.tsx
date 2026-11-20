@@ -5,7 +5,8 @@ import { EngineStatusCard } from './components/EngineStatusCard';
 import { ActionToolbar } from './components/ActionToolbar';
 import { WeeklyPlanTable } from './components/WeeklyPlanTable';
 import { QuickInstructions } from './components/QuickInstructions';
-import { ShoppingListSection } from './components/ShoppingListSection';
+import { ShoppingListSection, NutritionPrintMode } from './components/ShoppingListSection';
+import { NutritionMiniPrintSheet } from './components/NutritionMiniPrintSheet';
 import { TrainingView } from './components/TrainingView';
 import { TrackingView } from './components/TrackingView';
 import { ExerciseInfographicsView } from './components/ExerciseInfographicsView';
@@ -91,6 +92,7 @@ export default function App() {
   const [physicalProfile, setPhysicalProfile] = useState<PhysicalProfile>(DEFAULT_PHYSICAL_PROFILE);
   const [activeView, setActiveView] = useState<'table' | 'cards'>('table');
   const [isShuffling, setIsShuffling] = useState(false);
+  const [nutritionPrintMode, setNutritionPrintMode] = useState<NutritionPrintMode>('standard');
 
   // Modals state
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -310,10 +312,23 @@ export default function App() {
     []
   );
 
-  // Print menu
-  const handlePrint = useCallback(() => {
-    window.print();
+  // Print handlers (standard + pocket mini weekly sheets)
+  const handleTriggerNutritionPrint = useCallback((mode: NutritionPrintMode) => {
+    setNutritionPrintMode(mode);
+    const resetMode = () => setNutritionPrintMode('standard');
+    window.addEventListener('afterprint', resetMode, { once: true });
+    setTimeout(() => {
+      window.print();
+    }, 90);
   }, []);
+
+  const handlePrint = useCallback(() => {
+    if (activeTab === 'nutrition') {
+      handleTriggerNutritionPrint('diet_mini_week');
+    } else {
+      window.print();
+    }
+  }, [activeTab, handleTriggerNutritionPrint]);
 
   // Share menu summary
   const handleShare = useCallback(() => {
@@ -472,54 +487,72 @@ export default function App() {
         {/* TAB 2: NUTRITION PLAN (30 DÍAS INTERCAMBIABLE) */}
         {activeTab === 'nutrition' && (
           <div className="space-y-6 animate-in fade-in duration-200">
-            {/* User Profile & Clinical Rationale Banner */}
-            <UserProfileBanner
-              profile={userProfile}
-              onEditProfile={() => setIsProfileModalOpen(true)}
-              onNavigateToTracking={() => setActiveTab('tracking')}
-            />
+            <div className={nutritionPrintMode !== 'standard' ? 'space-y-6 print:hidden' : 'space-y-6'}>
+              {/* User Profile & Clinical Rationale Banner */}
+              <UserProfileBanner
+                profile={userProfile}
+                onEditProfile={() => setIsProfileModalOpen(true)}
+                onNavigateToTracking={() => setActiveTab('tracking')}
+              />
 
-            {/* Real-Time Algorithmic Engine Status Card */}
-            <EngineStatusCard
-              report={currentWeeklyPlan.validationReport}
-              activeWeekNumber={activeWeek}
-              weekLabel={currentWeeklyPlan.label}
-            />
+              {/* Real-Time Algorithmic Engine Status Card */}
+              <EngineStatusCard
+                report={currentWeeklyPlan.validationReport}
+                activeWeekNumber={activeWeek}
+                weekLabel={currentWeeklyPlan.label}
+              />
 
-            {/* Interactive Action Toolbar (30-Day Week Selector & Actions) */}
-            <ActionToolbar
-              onShuffleAll={handleShuffleWeek}
-              onRestoreCanonical={handleRestoreCanonical30Days}
-              onOpenDaySelector={() => setIsDaySelectorOpen(true)}
-              onViewShoppingList={handleScrollToShoppingList}
-              isShuffling={isShuffling}
-              activeView={activeView}
-              onChangeView={setActiveView}
-              activeWeek={activeWeek}
-              onChangeWeek={(w) => setActiveWeek(w)}
-            />
+              {/* Interactive Action Toolbar (30-Day Week Selector & Actions) */}
+              <ActionToolbar
+                onShuffleAll={handleShuffleWeek}
+                onRestoreCanonical={handleRestoreCanonical30Days}
+                onOpenDaySelector={() => setIsDaySelectorOpen(true)}
+                onViewShoppingList={handleScrollToShoppingList}
+                isShuffling={isShuffling}
+                activeView={activeView}
+                onChangeView={setActiveView}
+                activeWeek={activeWeek}
+                onChangeWeek={(w) => setActiveWeek(w)}
+              />
 
-            {/* Weekly Plan Table (5 Tomas Diarias + Escandallo + Bonus Entreno Duro) */}
-            <WeeklyPlanTable
-              days={currentWeeklyPlan.days}
-              activeWeekNumber={activeWeek}
-              weekLabel={currentWeeklyPlan.label}
-              activeView={activeView}
-              onSwapDay={handleRegenerateDay}
-              onSwapMeal={handleOpenSwapMeal}
-              onOpenMealDetail={handleOpenMealDetail}
-              onToggleHardTraining={handleToggleHardTraining}
-            />
+              {/* Weekly Plan Table (5 Tomas Diarias + Escandallo + Bonus Entreno Duro) */}
+              <WeeklyPlanTable
+                days={currentWeeklyPlan.days}
+                activeWeekNumber={activeWeek}
+                weekLabel={currentWeeklyPlan.label}
+                activeView={activeView}
+                onSwapDay={handleRegenerateDay}
+                onSwapMeal={handleOpenSwapMeal}
+                onOpenMealDetail={handleOpenMealDetail}
+                onToggleHardTraining={handleToggleHardTraining}
+                onPrintDietMiniWeek={() => handleTriggerNutritionPrint('diet_mini_week')}
+                onPrintDietMini4Weeks={() => handleTriggerNutritionPrint('diet_mini_4weeks')}
+              />
 
-            {/* Double Batch Cooking (Sunday + Wednesday) & Clinical Progression Rules */}
-            <QuickInstructions />
+              {/* Double Batch Cooking (Sunday + Wednesday) & Clinical Progression Rules */}
+              <QuickInstructions />
+            </div>
 
-            {/* Consolidated Grocery List (Active Week, Fortnight, or Full 30 Days) */}
+            {/* Consolidated Grocery List (Active Week, Fortnight, or Full 30 Days + Mini Weekly Print) */}
             <ShoppingListSection
               currentWeekPlan={currentWeeklyPlan}
               allWeeks={allWeeks}
               activeWeekNumber={activeWeek}
+              nutritionPrintMode={nutritionPrintMode}
+              onTriggerNutritionPrint={handleTriggerNutritionPrint}
             />
+
+            {/* Dedicated Mini Pocket Diet Print Sheet (1 week or 4 separate weekly sheets) */}
+            {(nutritionPrintMode === 'diet_mini_week' || nutritionPrintMode === 'diet_mini_4weeks') && (
+              <NutritionMiniPrintSheet
+                weeks={
+                  nutritionPrintMode === 'diet_mini_4weeks'
+                    ? allWeeks.filter((w) => w.weekNumber <= 4)
+                    : [currentWeeklyPlan]
+                }
+                userProfile={userProfile}
+              />
+            )}
           </div>
         )}
 
@@ -546,7 +579,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500 text-center mt-12">
+      <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500 text-center mt-12 print:hidden">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800">NutriVida Integral</span>

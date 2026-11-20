@@ -19,7 +19,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   AlertTriangle,
-  Check
+  Check,
+  Printer
 } from 'lucide-react';
 import {
   DOWNHILL_TECHNIQUES,
@@ -75,6 +76,7 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
   const [showScientificRationale, setShowScientificRationale] = useState(true);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [activeCycleWeek, setActiveCycleWeek] = useState<1 | 2 | 3 | 4>(activeWeekNumber);
+  const [printRange, setPrintRange] = useState<'2_weeks_1_2' | '2_weeks_3_4' | '4_weeks'>('2_weeks_1_2');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const storageKey = effectiveUid
@@ -249,8 +251,49 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
     userProfile?.currentWeightKg && userProfile.currentWeightKg > 0 ? userProfile.currentWeightKg : 102;
   const currentCycleWeekInfo = generatedProgram.weeks[activeCycleWeek - 1] || generatedProgram.weeks[0];
 
+  const handlePrintProgram = (rangeOverride?: '2_weeks_1_2' | '2_weeks_3_4' | '4_weeks') => {
+    if (rangeOverride && rangeOverride !== printRange) {
+      setPrintRange(rangeOverride);
+    }
+    setTimeout(() => {
+      window.print();
+    }, 90);
+  };
+
+  const printWeeks = useMemo(() => {
+    if (printRange === '2_weeks_1_2') return generatedProgram.weeks.slice(0, 2);
+    if (printRange === '2_weeks_3_4') return generatedProgram.weeks.slice(2, 4);
+    return generatedProgram.weeks;
+  }, [generatedProgram.weeks, printRange]);
+
+  const printableSessions = useMemo(() => {
+    const seen = new Set<string>();
+    const list: GeneratedSessionPlan[] = [];
+    for (const day of config.customSchedule) {
+      if (isStrengthRole(day.role) && !seen.has(day.role)) {
+        const sess = generatedProgram.sessions[day.role];
+        if (sess) {
+          seen.add(day.role);
+          list.push(sess);
+        }
+      }
+    }
+    if (list.length === 0) {
+      list.push(generatedProgram.sessions.fuerza_a, generatedProgram.sessions.fuerza_b);
+    }
+    return list;
+  }, [config.customSchedule, generatedProgram.sessions]);
+
+  const environmentLabel =
+    config.environment === 'gym'
+      ? 'Gimnasio (6 Patrones)'
+      : config.environment === 'home'
+      ? 'Casa (Material + Alternativas)'
+      : 'Híbrido (Gimnasio + Casa)';
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="animate-in fade-in duration-200">
+      <div className="space-y-6 print:hidden">
       {/* Toast Feedback */}
       {toastMsg && (
         <div className="fixed top-20 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs flex items-center gap-2 border border-teal-500/40">
@@ -282,8 +325,8 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
               </div>
             </div>
 
-            {/* 4-Week Cycle Switcher */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            {/* 4-Week Cycle Switcher & 2-Week Print Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
               <div className="bg-slate-800/80 p-1 rounded-xl border border-slate-700 flex text-xs">
                 {([1, 2, 3, 4] as const).map((wk) => (
                   <button
@@ -303,6 +346,32 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
                     {wk === 4 ? 'S4 Descarga' : `Semana ${wk}`}
                   </button>
                 ))}
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-xl border border-slate-700 text-xs">
+                <select
+                  value={printRange}
+                  onChange={(e) =>
+                    setPrintRange(e.target.value as '2_weeks_1_2' | '2_weeks_3_4' | '4_weeks')
+                  }
+                  className="bg-slate-900 text-slate-100 text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                  aria-label="Periodo a imprimir"
+                >
+                  <option value="2_weeks_1_2">2 Semanas (S1–S2)</option>
+                  <option value="2_weeks_3_4">2 Semanas (S3–S4)</option>
+                  <option value="4_weeks">4 Semanas Completas</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handlePrintProgram()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold transition-colors cursor-pointer"
+                  title="Imprimir programa de entrenamiento en formato limpio"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>
+                    {printRange === '4_weeks' ? 'Imprimir 4 Sem' : 'Imprimir 2 Sem'}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
@@ -392,6 +461,15 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Reparto óptimo 48h</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePrintProgram('2_weeks_1_2')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold bg-slate-900 hover:bg-slate-800 text-white transition-colors cursor-pointer"
+              title="Imprimir programa completo de 2 semanas (S1–S2)"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Imprimir 2 Semanas</span>
             </button>
             <button
               type="button"
@@ -1144,6 +1222,221 @@ export const TrainingView: React.FC<TrainingViewProps> = ({
           </div>
         </div>
       )}
+      </div>
+
+      {/* DEDICATED PRINTABLE SHEET (2-Week or 4-Week Program) */}
+      <div className="hidden print:block space-y-5 text-slate-900 text-[11px] leading-snug">
+        {/* Print Header */}
+        <div className="border-b-2 border-slate-900 pb-3 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
+              NutriVida · Programa de Entrenamiento Personalizado
+            </p>
+            <h1 className="text-xl font-extrabold text-slate-950">
+              {printRange === '4_weeks'
+                ? 'Ciclo Completo de 4 Semanas (Progresión + Descarga)'
+                : printRange === '2_weeks_3_4'
+                ? 'Programa de Entrenamiento · 2 Semanas (S3 Progresión + S4 Descarga)'
+                : 'Programa de Entrenamiento · 2 Semanas (S1 Adaptación + S2 Consolidación)'}
+            </h1>
+            <p className="text-xs text-slate-700 mt-0.5">
+              {userProfile?.name ? `${userProfile.name} · ` : ''}
+              {activeAge} años · {activeWeight} kg · {environmentLabel} · {generatedProgram.structureTitle}
+            </p>
+          </div>
+          <div className="text-right text-[10px] bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 shrink-0">
+            <div className="font-bold text-slate-900">
+              {scheduleStats.strengthCount} sesiones fuerza/sem · {config.sessionMinutes} min
+            </div>
+            <div className="text-slate-700 font-mono">
+              {scheduleStats.totalKm} km cardio/sem · {scheduleStats.restCount} descanso activo
+            </div>
+            <div className="text-teal-800 font-bold mt-0.5">
+              Regla base: RIR 2–3 · Descanso 48 h
+            </div>
+          </div>
+        </div>
+
+        {/* Weeks Schedule Tables (2 weeks side-by-side or stacked cleanly) */}
+        <div className="space-y-4">
+          {printWeeks.map((wk) => (
+            <section key={wk.weekNumber} className="break-inside-avoid border border-slate-300 rounded-xl overflow-hidden">
+              <div
+                className={`px-3.5 py-2 border-b border-slate-300 flex items-center justify-between gap-2 ${
+                  wk.isDeload ? 'bg-amber-50' : 'bg-slate-100'
+                }`}
+              >
+                <div>
+                  <h2 className="font-extrabold text-xs text-slate-950">{wk.label}</h2>
+                  <p className="text-[10px] text-slate-700">{wk.progressionNote}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="inline-block font-bold text-[10px] px-2 py-0.5 rounded border border-slate-400 bg-white">
+                    {wk.setsMultiplierLabel} · {wk.rirTarget}
+                  </span>
+                </div>
+              </div>
+
+              <table className="w-full text-left border-collapse text-[10px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-300 text-slate-700">
+                    <th className="py-1.5 px-2.5 font-bold w-20">Día</th>
+                    <th className="py-1.5 px-2.5 font-bold w-44">Bloque Principal</th>
+                    <th className="py-1.5 px-2.5 font-bold w-40">Cardio / Ruta</th>
+                    <th className="py-1.5 px-2.5 font-bold w-32">Volumen / Desnivel</th>
+                    <th className="py-1.5 px-2.5 font-bold">Indicaciones de la Semana</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {config.customSchedule.map((day) => {
+                    const hasStrength = isStrengthRole(day.role);
+                    const linkedSession =
+                      hasStrength && generatedProgram.sessions[day.role]
+                        ? generatedProgram.sessions[day.role]
+                        : null;
+                    const weekPrescription = wk.isDeload
+                      ? 'Descarga: 1–2 series (RIR 3–4)'
+                      : wk.weekNumber === 1
+                      ? 'Semana 1: técnica y rango cómodo'
+                      : wk.weekNumber === 2
+                      ? 'Semana 2: +1 rep por serie'
+                      : 'Semana 3: +2–5% carga si tope reps';
+
+                    return (
+                      <tr key={`${wk.weekNumber}-${day.dayId}`} className="border-b border-slate-200 last:border-b-0">
+                        <td className="py-1.5 px-2.5 font-extrabold text-slate-900">{day.dayName}</td>
+                        <td className="py-1.5 px-2.5">
+                          <span className="font-bold text-slate-900">{ROLE_LABELS[day.role]}</span>
+                          {linkedSession && (
+                            <span className="block text-[9px] text-slate-600">
+                              {linkedSession.patterns.length} patrones · {weekPrescription}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-medium text-slate-800">
+                          {day.cardioType === 'ninguno' ? '—' : CARDIO_LABELS[day.cardioType]}
+                        </td>
+                        <td className="py-1.5 px-2.5 font-mono text-slate-700">
+                          {day.cardioType === 'ninguno'
+                            ? '—'
+                            : `${day.distanceKm} km · ${day.cardioDurationMinutes} min${
+                                day.elevationGainM > 0 ? ` (+${day.elevationGainM}/-${day.elevationLossM}m)` : ''
+                              }`}
+                        </td>
+                        <td className="py-1.5 px-2.5 text-slate-700">
+                          {day.note ||
+                            (linkedSession
+                              ? linkedSession.patterns
+                                  .slice(0, 3)
+                                  .map((p) => p.exerciseName)
+                                  .join(' · ')
+                              : 'Ritmo conversacional sin impacto articular.')}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+          ))}
+        </div>
+
+        {/* Assigned Strength Sessions Breakdown (6 Movement Patterns) */}
+        <div className="space-y-4">
+          <h2 className="text-sm font-extrabold text-slate-950 border-b border-slate-300 pb-1">
+            Detalle de Sesiones de Fuerza por Patrones de Movimiento ({environmentLabel})
+          </h2>
+
+          {printableSessions.map((session) => (
+            <section
+              key={session.sessionKey}
+              className="break-inside-avoid border border-slate-300 rounded-xl overflow-hidden"
+            >
+              <div className="bg-slate-100 px-3.5 py-2 border-b border-slate-300 flex items-center justify-between">
+                <h3 className="font-extrabold text-xs text-slate-950">{session.title}</h3>
+                <span className="text-[10px] font-bold text-slate-700">
+                  Duración aprox: {session.estimatedMinutes} min · Tempo excéntrico 3 s · RIR 2–3
+                </span>
+              </div>
+
+              <div className="px-3.5 py-1.5 bg-emerald-50/70 border-b border-slate-200 text-[10px] text-slate-800">
+                <strong>Calentamiento:</strong> {session.warmup}
+              </div>
+
+              <table className="w-full text-left border-collapse text-[10px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-300 text-slate-700">
+                    <th className="py-1.5 px-2.5 font-bold w-36">Orden y Patrón</th>
+                    <th className="py-1.5 px-2.5 font-bold w-44">Ejercicio</th>
+                    <th className="py-1.5 px-2.5 font-bold w-28">Series × Reps</th>
+                    <th className="py-1.5 px-2.5 font-bold w-16">Descanso</th>
+                    <th className="py-1.5 px-2.5 font-bold w-44">Material / Alternativa</th>
+                    <th className="py-1.5 px-2.5 font-bold">Nota Técnica</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {session.patterns.map((p, idx) => (
+                    <tr key={p.patternId} className="border-b border-slate-200 last:border-b-0">
+                      <td className="py-1.5 px-2.5 font-bold text-slate-800">
+                        {idx + 1}. {p.patternLabel}
+                      </td>
+                      <td className="py-1.5 px-2.5 font-bold text-teal-900">{p.exerciseName}</td>
+                      <td className="py-1.5 px-2.5 font-mono font-bold text-slate-900">
+                        {printRange === '2_weeks_3_4'
+                          ? `${p.setsReps} (S4: 1–2×10)`
+                          : p.setsReps}
+                      </td>
+                      <td className="py-1.5 px-2.5 font-mono text-slate-700">{p.restSeconds} s</td>
+                      <td className="py-1.5 px-2.5 text-slate-700">
+                        {p.equipmentUsed}
+                        {p.homemadeFallback ? ` (Casero: ${p.homemadeFallback})` : ''}
+                      </td>
+                      <td className="py-1.5 px-2.5 text-slate-600">{p.safetyCue}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="px-3.5 py-1.5 bg-slate-50 border-t border-slate-200 text-[10px] text-slate-800">
+                <strong>Vuelta a la calma:</strong> {session.cooldown}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {/* Trail & Safety Footer */}
+        <section className="break-inside-avoid grid grid-cols-2 gap-4 pt-1">
+          <div className="border border-slate-300 rounded-xl p-3 space-y-1">
+            <h3 className="font-extrabold text-xs text-slate-950">
+              Caminata GPS & Protección de Rodillas
+            </h3>
+            <p className="text-[10px] text-slate-700">
+              • Circuito base: <strong>6.9 km</strong> (70–80 min) · Altitud 74–312 m · Desnivel{' '}
+              <strong>+238 m / -238 m</strong>.
+            </p>
+            <p className="text-[10px] text-slate-700">
+              • En bajadas: usar bastones de marcha nórdica, pasos cortos y rodilla semiflexionada sin bloquear.
+            </p>
+            <p className="text-[10px] text-slate-700">
+              • Lluvia o fatiga articular: sustituir por 40–45 min de elíptica o bici estática.
+            </p>
+          </div>
+
+          <div className="border border-slate-300 rounded-xl p-3 space-y-1">
+            <h3 className="font-extrabold text-xs text-slate-950">
+              Reglas de Seguridad y Progresión
+            </h3>
+            <p className="text-[10px] text-slate-700">
+              • Dejar siempre <strong>2–3 reps en reserva (RIR 2–3)</strong> y al menos 48 h entre sesiones de fuerza.
+            </p>
+            {generatedProgram.safetyAlerts.slice(0, 3).map((alert, i) => (
+              <p key={i} className="text-[10px] text-slate-700">
+                • {alert}
+              </p>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 };
