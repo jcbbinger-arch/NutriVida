@@ -26,7 +26,15 @@ import {
   MapPin,
   Filter,
   Heart,
-  Gauge
+  Gauge,
+  Waves,
+  Copy,
+  Check,
+  Upload,
+  Wand2,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle
 } from 'lucide-react';
 import { fitStudioAudio } from '../services/fitStudioAudio';
 import { ExerciseSvgInfographic } from './ExerciseSvgInfographic';
@@ -71,8 +79,15 @@ export interface OutdoorRouteSession {
   fecha?: string;
   nombre_ruta?: string;
   timestamp: string;
-  tipo: 'Caminata' | 'Bicicleta';
+  tipo: 'Caminata' | 'Bicicleta' | 'Piscina';
+  subtipo_garmin?: string;
   distancia_km: number;
+  distancia_metros?: number;
+  longitud_piscina_m?: number;
+  largos_totales?: number;
+  swolf_medio?: number;
+  brazadas_totales?: number;
+  brazadas_por_largo?: number;
   tiempo_minutos: number;
   tiempo_formato?: string;
   tiempo_movimiento?: string;
@@ -171,9 +186,19 @@ export function parseDecimalInput(raw: string | number | undefined): number {
   return isNaN(parsed) ? NaN : parsed;
 }
 
-export function paceToDecimalMinutes(paceStr: string, timeMin?: number, distKm?: number): number {
+export function paceToDecimalMinutes(
+  paceStr: string,
+  timeMin?: number,
+  distKm?: number,
+  per100m = false
+): number {
   if (paceStr) {
-    const clean = paceStr.replace('min/km', '').replace('/km', '').trim();
+    const clean = paceStr
+      .replace(/min\/100m/gi, '')
+      .replace(/\/100m/gi, '')
+      .replace(/min\/km/gi, '')
+      .replace(/\/km/gi, '')
+      .trim();
     const parts = clean.split(':');
     if (parts.length === 2) {
       const mins = parseFloat(parts[0]);
@@ -182,7 +207,7 @@ export function paceToDecimalMinutes(paceStr: string, timeMin?: number, distKm?:
     }
   }
   if (timeMin && distKm && distKm > 0) {
-    return timeMin / distKm;
+    return per100m ? timeMin / (distKm * 10) : timeMin / distKm;
   }
   return 0;
 }
@@ -238,6 +263,292 @@ export function formatMinutesToGarminTime(totalMinutes: number): string {
   return `0:${pad(mins)}:${pad(secs)} min`;
 }
 
+// ============================================================================
+// PUENTE DIGITAL IA · PROMPT MAESTRO & PARSER PARA CAPTURAS DE GARMIN CONNECT
+// ============================================================================
+export const GARMIN_AI_BRIDGE_PROMPT = `Analiza las capturas de pantalla de la app Garmin Connect que te adjunto (pueden ser de Caminata, Carrera, Carrera en Cinta, Ciclismo, Bici Indoor o Natación en Piscina).
+Extrae todos los datos visibles y devuélveme ÚNICAMENTE un bloque JSON válido (sin texto adicional).
+- Si todas las capturas pertenecen a la MISMA actividad (ej. Resumen + Estadísticas), combínalas en UN SOLO objeto JSON.
+- Si son actividades distintas, devuelve un array JSON [ { ... }, { ... } ].
+- Usa punto decimal (ej. 4.3, no 4,3). Si un dato no aparece en las capturas, pon null.
+- En "tipo" usa exactamente uno de estos 3 valores: "Caminata", "Bicicleta" o "Piscina".
+  * Carrera, Cinta o Senderismo -> "tipo": "Caminata" (e indica el nombre real en "subtipo_garmin").
+  * Ciclismo o Bici Indoor -> "tipo": "Bicicleta".
+  * Natación en Piscina -> "tipo": "Piscina".
+- En "fecha" pon formato "YYYY-MM-DD" si se ve en la captura (o null si no aparece).
+
+Esquema JSON exacto:
+{
+  "tipo": "Caminata | Bicicleta | Piscina",
+  "subtipo_garmin": "Caminata | Carrera | Cinta | Ciclismo | Bici Indoor | Natación en Piscina",
+  "fecha": "YYYY-MM-DD o null",
+  "nombre_ruta": "Nombre o lugar si aparece o null",
+  "distancia_km": number o null,
+  "distancia_metros": number o null,
+  "tiempo_total": "H:MM:SS o MM:SS",
+  "tiempo_movimiento": "H:MM:SS o null",
+  "ritmo_medio": "MM:SS (/km para tierra o /100m para piscina) o null",
+  "ritmo_movimiento": "MM:SS o null",
+  "ritmo_optimo": "MM:SS o null",
+  "velocidad_media": number (km/h) o null,
+  "velocidad_movimiento": number (km/h) o null,
+  "velocidad_maxima": number (km/h) o null,
+  "fc_media": number (ppm) o null,
+  "fc_maxima": number (ppm) o null,
+  "training_effect_aerobico": number o null,
+  "cadencia_media": number o null,
+  "cadencia_max": number o null,
+  "longitud_zancada": number (metros) o null,
+  "ascenso_total": number (metros) o null,
+  "descenso_total": number (metros) o null,
+  "altura_minima": number (metros) o null,
+  "altura_maxima": number (metros) o null,
+  "calorias_totales": number o null,
+  "longitud_piscina_m": number (25 o 50 si es piscina) o null,
+  "largos_totales": number (si es piscina) o null,
+  "swolf_medio": number (si es piscina) o null,
+  "brazadas_totales": number (si es piscina) o null,
+  "brazadas_por_largo": number (si es piscina) o null
+}`;
+
+function parseBridgeNumber(val: unknown): number | undefined {
+  if (val === null || val === undefined || val === '') return undefined;
+  if (typeof val === 'number') return isNaN(val) ? undefined : val;
+  const cleaned = String(val)
+    .replace(/km\/h|min\/100m|min\/km|\/100m|\/km|kcal|ppm|bpm|m/gi, '')
+    .trim()
+    .replace(',', '.');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? undefined : num;
+}
+
+function cleanBridgeString(val: unknown): string | undefined {
+  if (val === null || val === undefined) return undefined;
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === 'null' || s === '—' || s === '--') return undefined;
+  return s;
+}
+
+function normalizeBridgeActivityType(rawTipo: unknown, rawSubtipo: unknown): {
+  tipo: 'Caminata' | 'Bicicleta' | 'Piscina';
+  subtipo?: string;
+} {
+  const combined = `${rawTipo ?? ''} ${rawSubtipo ?? ''}`.toLowerCase();
+  const subClean = cleanBridgeString(rawSubtipo) || cleanBridgeString(rawTipo);
+
+  if (/piscina|nataci[oó]n|swim|pool/.test(combined)) {
+    return { tipo: 'Piscina', subtipo: subClean || 'Natación en Piscina' };
+  }
+  if (/bici|ciclismo|cycling|bike|indoor/.test(combined)) {
+    return { tipo: 'Bicicleta', subtipo: subClean || 'Ciclismo' };
+  }
+  return { tipo: 'Caminata', subtipo: subClean || 'Caminata' };
+}
+
+export interface ParsedGarminBridgeResult {
+  sessions: OutdoorRouteSession[];
+  rawRecords: Record<string, unknown>[];
+  error?: string;
+}
+
+export function parseGarminBridgeJson(rawText: string, fallbackDate: string): ParsedGarminBridgeResult {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return { sessions: [], rawRecords: [], error: 'Pega primero el JSON que te devolvió la IA.' };
+  }
+
+  let jsonCandidate = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  // Isolate outer array or object if AI wrapped it with prose
+  const firstBracket = jsonCandidate.indexOf('[');
+  const firstBrace = jsonCandidate.indexOf('{');
+  if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
+    const lastBracket = jsonCandidate.lastIndexOf(']');
+    if (lastBracket > firstBracket) jsonCandidate = jsonCandidate.slice(firstBracket, lastBracket + 1);
+  } else if (firstBrace !== -1) {
+    const lastBrace = jsonCandidate.lastIndexOf('}');
+    if (lastBrace > firstBrace) jsonCandidate = jsonCandidate.slice(firstBrace, lastBrace + 1);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonCandidate);
+  } catch {
+    return {
+      sessions: [],
+      rawRecords: [],
+      error: 'No se pudo leer el JSON. Asegúrate de copiar completo el bloque { ... } devuelto por tu IA.'
+    };
+  }
+
+  const items = Array.isArray(parsed) ? parsed : [parsed];
+  const validRecords = items.filter((it): it is Record<string, unknown> => Boolean(it && typeof it === 'object'));
+
+  if (validRecords.length === 0) {
+    return { sessions: [], rawRecords: [], error: 'El JSON no contiene ninguna actividad válida.' };
+  }
+
+  const sessions: OutdoorRouteSession[] = [];
+  const nowTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+  validRecords.forEach((rec, idx) => {
+    const { tipo, subtipo } = normalizeBridgeActivityType(rec.tipo ?? rec.actividad, rec.subtipo_garmin);
+    const rawFecha = cleanBridgeString(rec.fecha);
+    const fecha = rawFecha && /^\d{4}-\d{2}-\d{2}$/.test(rawFecha) ? rawFecha : fallbackDate;
+    const nombreRuta = cleanBridgeString(rec.nombre_ruta);
+
+    const rawTiempo = cleanBridgeString(rec.tiempo_total) || cleanBridgeString(rec.tiempo);
+    const timeMin = rawTiempo ? parseTimeToMinutes(rawTiempo) : parseBridgeNumber(rec.tiempo_minutos) || 0;
+    const timeFormatted = timeMin > 0 ? formatMinutesToGarminTime(timeMin) : '0:00:00 min';
+    const tiempoMov = cleanBridgeString(rec.tiempo_movimiento);
+
+    const rawPaceAvg = cleanBridgeString(rec.ritmo_medio);
+    const rawPaceMov = cleanBridgeString(rec.ritmo_movimiento);
+    const rawPaceBest = cleanBridgeString(rec.ritmo_optimo);
+
+    const speedAvg = parseBridgeNumber(rec.velocidad_media);
+    const speedMov = parseBridgeNumber(rec.velocidad_movimiento);
+    const speedMax = parseBridgeNumber(rec.velocidad_maxima);
+
+    const hrAvg = parseBridgeNumber(rec.fc_media);
+    const hrMax = parseBridgeNumber(rec.fc_maxima);
+    const te = parseBridgeNumber(rec.training_effect_aerobico);
+    const cadAvg = parseBridgeNumber(rec.cadencia_media);
+    const cadMax = parseBridgeNumber(rec.cadencia_max);
+    const stride = parseBridgeNumber(rec.longitud_zancada);
+
+    const gain = parseBridgeNumber(rec.ascenso_total) ?? 0;
+    const loss = parseBridgeNumber(rec.descenso_total) ?? 0;
+    const altMin = parseBridgeNumber(rec.altura_minima);
+    const altMax = parseBridgeNumber(rec.altura_maxima);
+    const kcal = parseBridgeNumber(rec.calorias_totales);
+
+    const poolLen = parseBridgeNumber(rec.longitud_piscina_m);
+    const poolLengths = parseBridgeNumber(rec.largos_totales);
+    const poolSwolf = parseBridgeNumber(rec.swolf_medio);
+    const poolStrokes = parseBridgeNumber(rec.brazadas_totales);
+    const poolStrokesPerLen = parseBridgeNumber(rec.brazadas_por_largo);
+
+    let distMeters = parseBridgeNumber(rec.distancia_metros);
+    let distKm = parseBridgeNumber(rec.distancia_km);
+
+    if (tipo === 'Piscina') {
+      if (distMeters === undefined && distKm !== undefined) {
+        distMeters = Math.round(distKm * 1000);
+      } else if (distMeters === undefined && poolLengths && poolLen) {
+        distMeters = Math.round(poolLengths * poolLen);
+      }
+      if (distMeters !== undefined && distKm === undefined) {
+        distKm = Math.round((distMeters / 1000) * 1000) / 1000;
+      }
+      if (distMeters === undefined && timeMin > 0 && rawPaceAvg) {
+        const pace100 = paceToDecimalMinutes(rawPaceAvg, undefined, undefined, true);
+        if (pace100 > 0) {
+          distMeters = Math.round((timeMin / pace100) * 100);
+          distKm = Math.round((distMeters / 1000) * 1000) / 1000;
+        }
+      }
+    } else {
+      if (distKm === undefined && distMeters !== undefined) {
+        distKm = Math.round((distMeters / 1000) * 100) / 100;
+      }
+      if (distKm === undefined && timeMin > 0) {
+        if (speedAvg && speedAvg > 0) {
+          distKm = Math.round(speedAvg * (timeMin / 60) * 100) / 100;
+        } else if (rawPaceAvg) {
+          const paceDec = paceToDecimalMinutes(rawPaceAvg);
+          if (paceDec > 0) distKm = Math.round((timeMin / paceDec) * 100) / 100;
+        }
+      }
+    }
+
+    const finalDistKm = distKm ?? 0;
+    const finalSpeed =
+      speedAvg && speedAvg > 0
+        ? Math.round(speedAvg * 100) / 100
+        : finalDistKm > 0 && timeMin > 0
+        ? Math.round((finalDistKm / (timeMin / 60)) * 100) / 100
+        : 0;
+
+    let finalPaceStr = '—';
+    if (tipo === 'Piscina') {
+      const p100 = paceToDecimalMinutes(rawPaceAvg || '', timeMin, finalDistKm, true);
+      if (p100 > 0) finalPaceStr = `${formatDecimalMinutesAsPace(p100)} min/100m`;
+    } else {
+      const pKm = paceToDecimalMinutes(rawPaceAvg || '', timeMin, finalDistKm, false);
+      if (pKm > 0) finalPaceStr = `${formatDecimalMinutesAsPace(pKm)} min/km`;
+      else if (finalSpeed > 0) finalPaceStr = `${formatDecimalMinutesAsPace(60 / finalSpeed)} min/km`;
+    }
+
+    let esfuerzo = tipo === 'Piscina' ? 'Natación en Piscina' : 'Bajo (Llano)';
+    if (tipo === 'Piscina') {
+      const extras: string[] = [];
+      if (distMeters) extras.push(`${Math.round(distMeters)}m`);
+      if (poolLengths) extras.push(`${Math.round(poolLengths)} largos`);
+      if (extras.length > 0) esfuerzo = `Piscina (${extras.join(' · ')})`;
+    } else {
+      if (gain > 200) esfuerzo = `Alto (+${Math.round(gain)}m ascenso pronunciado)`;
+      else if (gain > 80) esfuerzo = `Moderado (+${Math.round(gain)}m ascenso medio)`;
+    }
+    if (te && te > 0) esfuerzo = `${esfuerzo} · TE ${te.toFixed(1)}`;
+
+    if (finalDistKm <= 0 || timeMin <= 0) return;
+
+    sessions.push({
+      id: `out-${Date.now()}-${idx}`,
+      fecha,
+      ...(nombreRuta ? { nombre_ruta: nombreRuta } : {}),
+      timestamp: `${formatSpanishDateBadge(fecha)} ${nowTime} (IA)`,
+      tipo,
+      ...(subtipo ? { subtipo_garmin: subtipo } : {}),
+      distancia_km: finalDistKm,
+      ...(distMeters !== undefined && distMeters > 0 ? { distancia_metros: Math.round(distMeters) } : {}),
+      ...(poolLen !== undefined && poolLen > 0 ? { longitud_piscina_m: Math.round(poolLen) } : {}),
+      ...(poolLengths !== undefined && poolLengths > 0 ? { largos_totales: Math.round(poolLengths) } : {}),
+      ...(poolSwolf !== undefined && poolSwolf > 0 ? { swolf_medio: Math.round(poolSwolf) } : {}),
+      ...(poolStrokes !== undefined && poolStrokes > 0 ? { brazadas_totales: Math.round(poolStrokes) } : {}),
+      ...(poolStrokesPerLen !== undefined && poolStrokesPerLen > 0
+        ? { brazadas_por_largo: Math.round(poolStrokesPerLen * 10) / 10 }
+        : {}),
+      tiempo_minutos: Math.round(timeMin * 100) / 100,
+      tiempo_formato: timeFormatted,
+      ...(tiempoMov ? { tiempo_movimiento: tiempoMov } : {}),
+      ...(altMax !== undefined && altMax > 0 ? { altitud_m: Math.round(altMax) } : {}),
+      ...(altMin !== undefined && altMin >= 0 ? { altitud_min_m: Math.round(altMin) } : {}),
+      desnivel_positivo_m: Math.round(gain),
+      desnivel_negativo_m: Math.round(loss),
+      ritmo_min_km: finalPaceStr,
+      ...(rawPaceMov ? { ritmo_medio_movimiento: rawPaceMov } : {}),
+      ...(rawPaceBest ? { ritmo_optimo: rawPaceBest } : {}),
+      velocidad_kmh: finalSpeed,
+      ...(speedMov !== undefined && speedMov > 0 ? { velocidad_media_movimiento: speedMov } : {}),
+      ...(speedMax !== undefined && speedMax > 0 ? { velocidad_maxima_kmh: speedMax } : {}),
+      esfuerzo_acumulado: esfuerzo,
+      ...(hrAvg !== undefined && hrAvg > 0 ? { heart_rate_avg_bpm: Math.round(hrAvg) } : {}),
+      ...(hrMax !== undefined && hrMax > 0 ? { heart_rate_max_bpm: Math.round(hrMax) } : {}),
+      ...(te !== undefined && te > 0 ? { training_effect_aerobico: te } : {}),
+      ...(cadAvg !== undefined && cadAvg > 0 ? { cadencia_media_ppm: Math.round(cadAvg) } : {}),
+      ...(cadMax !== undefined && cadMax > 0 ? { cadencia_max_ppm: Math.round(cadMax) } : {}),
+      ...(stride !== undefined && stride > 0 ? { longitud_zancada_m: stride } : {}),
+      ...(kcal !== undefined && kcal > 0 ? { calorias_totales: Math.round(kcal) } : {}),
+      garmin_synced: true
+    });
+  });
+
+  if (sessions.length === 0) {
+    return {
+      sessions: [],
+      rawRecords: validRecords,
+      error: 'Falta distancia/metros o tiempo total válidos en el JSON para poder guardar la actividad.'
+    };
+  }
+
+  return { sessions, rawRecords: validRecords };
+}
+
 export interface StrengthSetLog {
   id: string;
   fecha: string;
@@ -258,9 +569,10 @@ export const FitStudioEngineView: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
 
   // ----------------------------------------------------
-  // MODULE 1: OUTDOOR ROUTE STATE & FORM (GARMIN CONNECT READY)
+  // MODULE 1: OUTDOOR & POOL ACTIVITY STATE & FORM (GARMIN CONNECT READY)
   // ----------------------------------------------------
-  const [routeType, setRouteType] = useState<'Caminata' | 'Bicicleta'>('Caminata');
+  const [routeType, setRouteType] = useState<'Caminata' | 'Bicicleta' | 'Piscina'>('Caminata');
+  const [routeSubtype, setRouteSubtype] = useState<string>('');
   const [outdoorInputMode, setOutdoorInputMode] = useState<'garmin' | 'distancia'>('garmin');
   const [routeDate, setRouteDate] = useState<string>(() => getTodayIsoDate());
   const [routeName, setRouteName] = useState<string>('');
@@ -295,11 +607,26 @@ export const FitStudioEngineView: React.FC = () => {
   const [routeAltitude, setRouteAltitude] = useState('313');
   const [routeCalories, setRouteCalories] = useState('589');
 
+  // Natación en Piscina (Garmin Connect)
+  const [poolDistanceMeters, setPoolDistanceMeters] = useState('1000');
+  const [poolLengthMeters, setPoolLengthMeters] = useState('25');
+  const [poolLengths, setPoolLengths] = useState('40');
+  const [poolSwolf, setPoolSwolf] = useState('42');
+  const [poolStrokesTotal, setPoolStrokesTotal] = useState('');
+  const [poolStrokesPerLength, setPoolStrokesPerLength] = useState('16');
+
+  // Puente Digital IA (Garmin Connect Screenshots -> JSON -> App)
+  const [isBridgeOpen, setIsBridgeOpen] = useState(true);
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [bridgeJsonInput, setBridgeJsonInput] = useState('');
+  const [bridgeFeedback, setBridgeFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+
   const [ellipticalHeartRateAvg, setEllipticalHeartRateAvg] = useState('128');
   const [isSyncingGarminDevice, setIsSyncingGarminDevice] = useState(false);
 
   // Comparison chart controls (Module 1)
-  const [compareActivityFilter, setCompareActivityFilter] = useState<'Caminata' | 'Bicicleta' | 'Todas'>('Caminata');
+  const [compareActivityFilter, setCompareActivityFilter] = useState<'Caminata' | 'Bicicleta' | 'Piscina' | 'Todas'>('Caminata');
   const [compareScope, setCompareScope] = useState<'similar' | 'all'>('similar');
   const [compareMetric, setCompareMetric] = useState<'velocidad' | 'ritmo' | 'fc' | 'calorias'>('velocidad');
   const [compareReferenceKey, setCompareReferenceKey] = useState<string>('auto');
@@ -308,9 +635,102 @@ export const FitStudioEngineView: React.FC = () => {
 
   const deletedIdsRef = useRef<Set<string>>(new Set());
 
+  const parsedBridgePreview = useMemo(() => {
+    if (!bridgeJsonInput.trim()) return null;
+    return parseGarminBridgeJson(bridgeJsonInput, routeDate || getTodayIsoDate());
+  }, [bridgeJsonInput, routeDate]);
+
+  const handleCopyGarminPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(GARMIN_AI_BRIDGE_PROMPT);
+      setPromptCopied(true);
+      setBridgeFeedback({
+        kind: 'success',
+        text: 'Prompt copiado. Pégalo en ChatGPT, Gemini o Claude junto a tus capturas de Garmin Connect.'
+      });
+      setTimeout(() => setPromptCopied(false), 3000);
+    } catch {
+      setShowPromptPreview(true);
+      setBridgeFeedback({
+        kind: 'error',
+        text: 'No se pudo copiar automático; selecciona el texto del prompt debajo y cópialo manualmente.'
+      });
+    }
+  };
+
+  const applyBridgeSessionToForm = (session: OutdoorRouteSession) => {
+    setRouteType(session.tipo);
+    setCompareActivityFilter(session.tipo);
+    setRouteSubtype(session.subtipo_garmin || '');
+    if (session.fecha) setRouteDate(session.fecha);
+    setRouteName(session.nombre_ruta || '');
+    setRouteTime(session.tiempo_formato ? session.tiempo_formato.replace(/\s*min$/i, '').trim() : '');
+    setRouteMovingTime(session.tiempo_movimiento || '');
+
+    if (session.tipo === 'Piscina') {
+      const meters = session.distancia_metros ?? Math.round(session.distancia_km * 1000);
+      setPoolDistanceMeters(meters > 0 ? String(meters) : '');
+      setPoolLengthMeters(session.longitud_piscina_m ? String(session.longitud_piscina_m) : '25');
+      setPoolLengths(session.largos_totales ? String(session.largos_totales) : '');
+      setPoolSwolf(session.swolf_medio ? String(session.swolf_medio) : '');
+      setPoolStrokesTotal(session.brazadas_totales ? String(session.brazadas_totales) : '');
+      setPoolStrokesPerLength(session.brazadas_por_largo ? String(session.brazadas_por_largo) : '');
+      setRoutePaceAvg(session.ritmo_min_km.replace(/\s*min\/100m$/i, '').trim());
+    } else {
+      setOutdoorInputMode('garmin');
+      setRouteDistance(session.distancia_km > 0 ? String(session.distancia_km) : '');
+      setRoutePaceAvg(session.ritmo_min_km.replace(/\s*min\/km$/i, '').trim());
+      setRoutePaceMoving(session.ritmo_medio_movimiento || '');
+      setRoutePaceBest(session.ritmo_optimo || '');
+      setRouteSpeedAvg(session.velocidad_kmh > 0 ? String(session.velocidad_kmh) : '');
+      setRouteSpeedMoving(session.velocidad_media_movimiento ? String(session.velocidad_media_movimiento) : '');
+      setRouteSpeedMax(session.velocidad_maxima_kmh ? String(session.velocidad_maxima_kmh) : '');
+      setRouteCadenceAvg(session.cadencia_media_ppm ? String(session.cadencia_media_ppm) : '');
+      setRouteCadenceMax(session.cadencia_max_ppm ? String(session.cadencia_max_ppm) : '');
+      setRouteStrideLength(session.longitud_zancada_m ? String(session.longitud_zancada_m) : '');
+      setRouteElevGain(session.desnivel_positivo_m ? String(session.desnivel_positivo_m) : '0');
+      setRouteElevLoss(session.desnivel_negativo_m ? String(session.desnivel_negativo_m) : '0');
+      setRouteAltitudeMin(session.altitud_min_m !== undefined ? String(session.altitud_min_m) : '');
+      setRouteAltitude(session.altitud_m ? String(session.altitud_m) : '');
+    }
+
+    setRouteHeartRateAvg(session.heart_rate_avg_bpm ? String(session.heart_rate_avg_bpm) : '');
+    setRouteHeartRateMax(session.heart_rate_max_bpm ? String(session.heart_rate_max_bpm) : '');
+    setRouteTrainingEffect(session.training_effect_aerobico ? String(session.training_effect_aerobico) : '');
+    setRouteCalories(session.calorias_totales ? String(session.calorias_totales) : '');
+  };
+
+  const handleBridgeLoadIntoForm = () => {
+    const res = parseGarminBridgeJson(bridgeJsonInput, routeDate || getTodayIsoDate());
+    if (res.error || res.sessions.length === 0) {
+      setBridgeFeedback({ kind: 'error', text: res.error || 'No se encontraron datos válidos.' });
+      return;
+    }
+    applyBridgeSessionToForm(res.sessions[0]);
+    setBridgeFeedback({
+      kind: 'success',
+      text: `Datos de ${res.sessions[0].subtipo_garmin || res.sessions[0].tipo} cargados en el formulario. Revisa fecha/ruta y pulsa Guardar.`
+    });
+  };
+
   const handleLoadGarminSample = () => {
+    setRouteSubtype('');
+    if (routeType === 'Piscina') {
+      setPoolDistanceMeters('1000');
+      setPoolLengthMeters('25');
+      setPoolLengths('40');
+      setRouteTime('0:26:40');
+      setRoutePaceAvg('2:40');
+      setPoolSwolf('42');
+      setPoolStrokesTotal('640');
+      setPoolStrokesPerLength('16');
+      setRouteHeartRateAvg('122');
+      setRouteHeartRateMax('140');
+      setRouteTrainingEffect('2,8');
+      setRouteCalories('310');
+      return;
+    }
     setOutdoorInputMode('garmin');
-    setRouteType('Caminata');
     setRouteTime('1:33:16');
     setRouteMovingTime('1:33:01');
     setRouteDistance('');
@@ -389,16 +809,51 @@ export const FitStudioEngineView: React.FC = () => {
     return Array.from(names);
   }, [routeHistory]);
 
-  // Calculate live outdoor metrics (supports direct Garmin Connect Estadísticas OR Distance+Time mode)
+  // Calculate live outdoor & pool metrics (supports Piscina + Garmin Connect Estadísticas OR Distance+Time mode)
   const liveOutdoorMetrics = useMemo(() => {
-    const explicitDist = parseDecimalInput(routeDistance);
     const time = parseTimeToMinutes(routeTime);
-    const gain = parseDecimalInput(routeElevGain) || 0;
     const te = parseDecimalInput(routeTrainingEffect);
+    const formattedTime = formatMinutesToGarminTime(time);
+
+    if (routeType === 'Piscina') {
+      const explicitMeters = parseDecimalInput(poolDistanceMeters);
+      const poolLen = parseDecimalInput(poolLengthMeters) || 25;
+      const lengths = parseDecimalInput(poolLengths);
+      const meters =
+        !isNaN(explicitMeters) && explicitMeters > 0
+          ? Math.round(explicitMeters)
+          : !isNaN(lengths) && lengths > 0
+          ? Math.round(lengths * poolLen)
+          : 0;
+      const dist = meters > 0 ? Math.round((meters / 1000) * 1000) / 1000 : 0;
+      const computedLengths = !isNaN(lengths) && lengths > 0 ? Math.round(lengths) : meters > 0 && poolLen > 0 ? Math.round(meters / poolLen) : 0;
+      const velocidad = dist > 0 && time > 0 ? Math.round((dist / (time / 60)) * 100) / 100 : 0;
+      const pace100 = paceToDecimalMinutes(routePaceAvg, time, dist, true);
+      const ritmoStr = pace100 > 0 ? `${formatDecimalMinutesAsPace(pace100)} min/100m` : '—';
+
+      let esfuerzo = 'Natación en Piscina';
+      if (meters > 0) {
+        esfuerzo = `Piscina (${meters}m${computedLengths > 0 ? ` · ${computedLengths} largos` : ''})`;
+      }
+      if (!isNaN(te) && te > 0) esfuerzo = `${esfuerzo} · TE ${te.toFixed(1)}`;
+
+      return {
+        ritmo: ritmoStr,
+        velocidadKmh: velocidad,
+        esfuerzo: dist > 0 && time > 0 ? esfuerzo : 'Pendiente de datos',
+        tiempoFormateado: formattedTime,
+        tiempoMinutos: time,
+        distanciaKm: dist,
+        distanciaMetros: meters,
+        computedLengths,
+        distIsEstimated: isNaN(explicitMeters) || explicitMeters <= 0
+      };
+    }
+
+    const explicitDist = parseDecimalInput(routeDistance);
+    const gain = parseDecimalInput(routeElevGain) || 0;
     const garminSpeed = parseDecimalInput(routeSpeedAvg);
     const garminPaceDec = paceToDecimalMinutes(routePaceAvg);
-
-    const formattedTime = formatMinutesToGarminTime(time);
 
     let dist = !isNaN(explicitDist) && explicitDist > 0 ? explicitDist : 0;
     let distIsEstimated = false;
@@ -438,6 +893,8 @@ export const FitStudioEngineView: React.FC = () => {
         tiempoFormateado: formattedTime,
         tiempoMinutos: time,
         distanciaKm: dist,
+        distanciaMetros: Math.round(dist * 1000),
+        computedLengths: 0,
         distIsEstimated
       };
     }
@@ -456,21 +913,30 @@ export const FitStudioEngineView: React.FC = () => {
       tiempoFormateado: formattedTime,
       tiempoMinutos: time,
       distanciaKm: dist,
+      distanciaMetros: Math.round(dist * 1000),
+      computedLengths: 0,
       distIsEstimated
     };
   }, [
+    routeType,
     outdoorInputMode,
     routeDistance,
     routeTime,
     routeElevGain,
     routeTrainingEffect,
     routeSpeedAvg,
-    routePaceAvg
+    routePaceAvg,
+    poolDistanceMeters,
+    poolLengthMeters,
+    poolLengths
   ]);
 
-  // Helper: Find comparable sessions for a given route (same route name OR similar km ±0.75 km within same activity type)
+  // Helper: Find comparable sessions for a given route (same route name OR similar km ±0.75 km / ±200m for Piscina)
   const getOutdoorComparisonBaseline = useCallback(
-    (target: { tipo: 'Caminata' | 'Bicicleta'; distancia_km: number; nombre_ruta?: string }, excludeId?: string) => {
+    (
+      target: { tipo: 'Caminata' | 'Bicicleta' | 'Piscina'; distancia_km: number; nombre_ruta?: string },
+      excludeId?: string
+    ) => {
       const sameType = routeHistory.filter((r) => r.tipo === target.tipo && r.id !== excludeId);
       const trimmedName = target.nombre_ruta?.trim().toLowerCase();
 
@@ -482,19 +948,25 @@ export const FitStudioEngineView: React.FC = () => {
         }
       }
 
-      const similarDist = sameType.filter((r) => Math.abs(r.distancia_km - target.distancia_km) <= 0.75);
+      const distTolerance = target.tipo === 'Piscina' ? 0.2 : 0.75;
+      const similarDist = sameType.filter((r) => Math.abs(r.distancia_km - target.distancia_km) <= distTolerance);
       if (similarDist.length > 0) {
         const meanSpeed = similarDist.reduce((sum, r) => sum + (r.velocidad_kmh || 0), 0) / similarDist.length;
+        const distDesc =
+          target.tipo === 'Piscina'
+            ? `piscinas ~${Math.round(target.distancia_km * 1000)} m`
+            : `${target.tipo.toLowerCase()}s ~${target.distancia_km.toFixed(1)} km`;
         return {
           pool: similarDist,
           meanSpeed,
-          label: `${target.tipo.toLowerCase()}s ~${target.distancia_km.toFixed(1)} km`
+          label: distDesc
         };
       }
 
       if (sameType.length > 0) {
         const meanSpeed = sameType.reduce((sum, r) => sum + (r.velocidad_kmh || 0), 0) / sameType.length;
-        return { pool: sameType, meanSpeed, label: `todas tus ${target.tipo.toLowerCase()}s` };
+        const typeDesc = target.tipo === 'Piscina' ? 'todas tus sesiones de piscina' : `todas tus ${target.tipo.toLowerCase()}s`;
+        return { pool: sameType, meanSpeed, label: typeDesc };
       }
 
       return null;
@@ -565,6 +1037,7 @@ export const FitStudioEngineView: React.FC = () => {
       compareActivityFilter === 'Todas' ? 'Todas las rutas' : `Todas las ${compareActivityFilter.toLowerCase()}s`;
 
     if (compareScope === 'similar' && pool.length > 0) {
+      const tol = compareActivityFilter === 'Piscina' ? 0.2 : 0.75;
       if (compareReferenceKey.startsWith('name:')) {
         const targetName = compareReferenceKey.slice(5).toLowerCase();
         pool = pool.filter((r) => r.nombre_ruta?.trim().toLowerCase() === targetName);
@@ -572,8 +1045,11 @@ export const FitStudioEngineView: React.FC = () => {
       } else if (compareReferenceKey.startsWith('dist:')) {
         const targetDist = parseFloat(compareReferenceKey.slice(5));
         if (!isNaN(targetDist)) {
-          pool = pool.filter((r) => Math.abs(r.distancia_km - targetDist) <= 0.75);
-          scopeLabel = `Distancia ~${targetDist.toFixed(1)} km (±0.75 km)`;
+          pool = pool.filter((r) => Math.abs(r.distancia_km - targetDist) <= tol);
+          scopeLabel =
+            compareActivityFilter === 'Piscina'
+              ? `Distancia ~${Math.round(targetDist * 1000)} m (±200 m)`
+              : `Distancia ~${targetDist.toFixed(1)} km (±0.75 km)`;
         }
       } else {
         // 'auto': match current form routeName or form/computed distance
@@ -584,10 +1060,13 @@ export const FitStudioEngineView: React.FC = () => {
           pool = nameMatches;
           scopeLabel = `Ruta "${routeName.trim()}"`;
         } else if (formDist > 0) {
-          const distMatches = pool.filter((r) => Math.abs(r.distancia_km - formDist) <= 0.75);
+          const distMatches = pool.filter((r) => Math.abs(r.distancia_km - formDist) <= tol);
           if (distMatches.length > 0) {
             pool = distMatches;
-            scopeLabel = `Distancia ~${formDist.toFixed(1)} km (±0.75 km)`;
+            scopeLabel =
+              compareActivityFilter === 'Piscina'
+                ? `Distancia ~${Math.round(formDist * 1000)} m (±200 m)`
+                : `Distancia ~${formDist.toFixed(1)} km (±0.75 km)`;
           }
         }
       }
@@ -608,7 +1087,7 @@ export const FitStudioEngineView: React.FC = () => {
           : item.tiempo_minutos > 0
           ? Math.round((item.distancia_km / (item.tiempo_minutos / 60)) * 100) / 100
           : 0;
-      const pace = paceToDecimalMinutes(item.ritmo_min_km, item.tiempo_minutos, item.distancia_km);
+      const pace = paceToDecimalMinutes(item.ritmo_min_km, item.tiempo_minutos, item.distancia_km, item.tipo === 'Piscina');
       const hr = item.heart_rate_avg_bpm || 0;
       const kcal = item.calorias_totales || 0;
 
@@ -670,15 +1149,15 @@ export const FitStudioEngineView: React.FC = () => {
     liveOutdoorMetrics.distanciaKm
   ]);
 
-  // Handle register outdoor route tool
+  // Handle register outdoor or pool activity
   const handleRegisterOutdoorRoute = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const dist = liveOutdoorMetrics.distanciaKm;
     const time = liveOutdoorMetrics.tiempoMinutos;
     const altMax = parseDecimalInput(routeAltitude);
     const altMin = parseDecimalInput(routeAltitudeMin);
-    const gain = parseDecimalInput(routeElevGain) || 0;
-    const loss = parseDecimalInput(routeElevLoss) || 0;
+    const gain = routeType === 'Piscina' ? 0 : parseDecimalInput(routeElevGain) || 0;
+    const loss = routeType === 'Piscina' ? 0 : parseDecimalInput(routeElevLoss) || 0;
     const hrAvg = parseInt(routeHeartRateAvg, 10);
     const hrMax = parseInt(routeHeartRateMax, 10);
     const te = parseDecimalInput(routeTrainingEffect);
@@ -689,11 +1168,18 @@ export const FitStudioEngineView: React.FC = () => {
     const speedMov = parseDecimalInput(routeSpeedMoving);
     const speedMax = parseDecimalInput(routeSpeedMax);
 
+    const poolLen = parseInt(poolLengthMeters, 10);
+    const pLengths = liveOutdoorMetrics.computedLengths || parseInt(poolLengths, 10);
+    const pSwolf = parseInt(poolSwolf, 10);
+    const pStrokes = parseInt(poolStrokesTotal, 10);
+    const pStrokesPerLen = parseDecimalInput(poolStrokesPerLength);
+
     if (isNaN(dist) || isNaN(time) || dist <= 0 || time <= 0) return;
 
     const chosenFecha = routeDate || getTodayIsoDate();
     const formattedTime = formatMinutesToGarminTime(time);
     const trimmedName = routeName.trim();
+    const trimmedSubtype = routeSubtype.trim();
     const trimmedMovingTime = routeMovingTime.trim();
     const trimmedPaceMov = routePaceMoving.trim();
     const trimmedPaceBest = routePaceBest.trim();
@@ -705,27 +1191,38 @@ export const FitStudioEngineView: React.FC = () => {
       ...(trimmedName ? { nombre_ruta: trimmedName } : {}),
       timestamp: `${formatSpanishDateBadge(chosenFecha)} ${nowTime}`,
       tipo: routeType,
+      ...(trimmedSubtype ? { subtipo_garmin: trimmedSubtype } : {}),
       distancia_km: dist,
+      ...(routeType === 'Piscina' && liveOutdoorMetrics.distanciaMetros > 0
+        ? { distancia_metros: liveOutdoorMetrics.distanciaMetros }
+        : {}),
+      ...(routeType === 'Piscina' && !isNaN(poolLen) && poolLen > 0 ? { longitud_piscina_m: poolLen } : {}),
+      ...(routeType === 'Piscina' && !isNaN(pLengths) && pLengths > 0 ? { largos_totales: pLengths } : {}),
+      ...(routeType === 'Piscina' && !isNaN(pSwolf) && pSwolf > 0 ? { swolf_medio: pSwolf } : {}),
+      ...(routeType === 'Piscina' && !isNaN(pStrokes) && pStrokes > 0 ? { brazadas_totales: pStrokes } : {}),
+      ...(routeType === 'Piscina' && !isNaN(pStrokesPerLen) && pStrokesPerLen > 0
+        ? { brazadas_por_largo: pStrokesPerLen }
+        : {}),
       tiempo_minutos: Math.round(time * 100) / 100,
       tiempo_formato: formattedTime,
-      ...(trimmedMovingTime ? { tiempo_movimiento: trimmedMovingTime } : {}),
-      ...(!isNaN(altMax) && altMax > 0 ? { altitud_m: altMax } : {}),
-      ...(!isNaN(altMin) && altMin >= 0 ? { altitud_min_m: altMin } : {}),
+      ...(routeType !== 'Piscina' && trimmedMovingTime ? { tiempo_movimiento: trimmedMovingTime } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(altMax) && altMax > 0 ? { altitud_m: altMax } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(altMin) && altMin >= 0 ? { altitud_min_m: altMin } : {}),
       desnivel_positivo_m: gain,
       desnivel_negativo_m: loss,
       ritmo_min_km: liveOutdoorMetrics.ritmo,
-      ...(trimmedPaceMov ? { ritmo_medio_movimiento: trimmedPaceMov } : {}),
-      ...(trimmedPaceBest ? { ritmo_optimo: trimmedPaceBest } : {}),
+      ...(routeType !== 'Piscina' && trimmedPaceMov ? { ritmo_medio_movimiento: trimmedPaceMov } : {}),
+      ...(routeType !== 'Piscina' && trimmedPaceBest ? { ritmo_optimo: trimmedPaceBest } : {}),
       velocidad_kmh: liveOutdoorMetrics.velocidadKmh,
-      ...(!isNaN(speedMov) && speedMov > 0 ? { velocidad_media_movimiento: speedMov } : {}),
-      ...(!isNaN(speedMax) && speedMax > 0 ? { velocidad_maxima_kmh: speedMax } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(speedMov) && speedMov > 0 ? { velocidad_media_movimiento: speedMov } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(speedMax) && speedMax > 0 ? { velocidad_maxima_kmh: speedMax } : {}),
       esfuerzo_acumulado: liveOutdoorMetrics.esfuerzo,
       ...(!isNaN(hrAvg) && hrAvg > 0 ? { heart_rate_avg_bpm: hrAvg } : {}),
       ...(!isNaN(hrMax) && hrMax > 0 ? { heart_rate_max_bpm: hrMax } : {}),
       ...(!isNaN(te) && te > 0 ? { training_effect_aerobico: te } : {}),
-      ...(!isNaN(cadAvg) && cadAvg > 0 ? { cadencia_media_ppm: cadAvg } : {}),
-      ...(!isNaN(cadMax) && cadMax > 0 ? { cadencia_max_ppm: cadMax } : {}),
-      ...(!isNaN(stride) && stride > 0 ? { longitud_zancada_m: stride } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(cadAvg) && cadAvg > 0 ? { cadencia_media_ppm: cadAvg } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(cadMax) && cadMax > 0 ? { cadencia_max_ppm: cadMax } : {}),
+      ...(routeType !== 'Piscina' && !isNaN(stride) && stride > 0 ? { longitud_zancada_m: stride } : {}),
       ...(!isNaN(kcal) && kcal > 0 ? { calorias_totales: kcal } : {}),
       garmin_synced: true
     };
@@ -744,6 +1241,38 @@ export const FitStudioEngineView: React.FC = () => {
       status: 'EXITO',
       data: newSession,
       timestamp: new Date().toLocaleTimeString()
+    });
+  };
+
+  const handleBridgeSaveDirect = () => {
+    const res = parseGarminBridgeJson(bridgeJsonInput, routeDate || getTodayIsoDate());
+    if (res.error || res.sessions.length === 0) {
+      setBridgeFeedback({ kind: 'error', text: res.error || 'No se encontraron actividades válidas.' });
+      return;
+    }
+
+    const updated = [...res.sessions, ...routeHistory];
+    setRouteHistory(updated);
+    setCompareActivityFilter(res.sessions[0].tipo);
+    try {
+      localStorage.setItem('fitstudio_outdoor_history', JSON.stringify(updated));
+    } catch {}
+
+    res.sessions.forEach((sess) => {
+      saveOutdoorRouteToCloud(sess);
+    });
+
+    setConsoleOutput({
+      toolName: 'puenteDigitalGarminIA',
+      status: 'EXITO',
+      data: res.sessions.length === 1 ? res.sessions[0] : res.sessions,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    setBridgeJsonInput('');
+    setBridgeFeedback({
+      kind: 'success',
+      text: `${res.sessions.length} sesión(es) importada(s) desde Garmin IA y guardada(s) en el histórico.`
     });
   };
 
@@ -1334,7 +1863,7 @@ export const FitStudioEngineView: React.FC = () => {
               }`}
             >
               <Compass className="w-4 h-4" />
-              <span>1. Ruta Exterior (Caminata / Bicicleta)</span>
+              <span>1. Garmin (Caminata / Bici / Piscina)</span>
             </button>
 
             <button
@@ -1805,18 +2334,18 @@ export const FitStudioEngineView: React.FC = () => {
       {/* ======================================================== */}
       {activeModule === 'outdoor' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Form: Register Outdoor Session */}
+          {/* Form: Register Outdoor or Pool Session */}
           <div className="lg:col-span-5 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/90 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <span className="p-2 rounded-xl bg-emerald-100 text-emerald-800">
-                  <Compass className="w-5 h-5" />
+                  {routeType === 'Piscina' ? <Waves className="w-5 h-5 text-sky-700" /> : <Compass className="w-5 h-5" />}
                 </span>
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    Registrar Ruta Exterior
+                    Registrar Actividad Garmin
                   </h3>
-                  <span className="text-[11px] text-slate-500">Caminata o Bicicleta con Desnivel</span>
+                  <span className="text-[11px] text-slate-500">Caminata/Carrera, Bicicleta y Piscina</span>
                 </div>
               </div>
               <span className="font-mono text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
@@ -1854,16 +2383,176 @@ export const FitStudioEngineView: React.FC = () => {
               </div>
             </div>
 
+            {/* PUENTE DIGITAL IA · GARMIN SCREENSHOTS -> JSON -> APP */}
+            <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50/90 via-white to-teal-50/70 overflow-hidden shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setIsBridgeOpen((prev) => !prev)}
+                className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-indigo-100/40 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-600 text-white">
+                    <Wand2 className="w-3.5 h-3.5" />
+                  </span>
+                  <div>
+                    <div className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                      <span>Puente Digital IA · Capturas Garmin</span>
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                        Bici / Carrera / Piscina
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-600 block">
+                      Copia el prompt, pásalo con tus capturas a ChatGPT/Gemini y pega el JSON aquí
+                    </span>
+                  </div>
+                </div>
+                {isBridgeOpen ? (
+                  <ChevronUp className="w-4 h-4 text-indigo-700 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-indigo-700 shrink-0" />
+                )}
+              </button>
+
+              {isBridgeOpen && (
+                <div className="px-3.5 pb-3.5 pt-1 space-y-2.5 border-t border-indigo-100 text-xs">
+                  {/* Step 1: Copy Prompt */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <div className="text-[11px] text-slate-700">
+                      <strong className="text-indigo-950">Paso 1:</strong> Copia el prompt y envíalo a tu IA con las capturas
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowPromptPreview((v) => !v)}
+                        className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                      >
+                        {showPromptPreview ? 'Ocultar Prompt' : 'Ver Prompt'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyGarminPrompt}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                          promptCopied
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs'
+                        }`}
+                      >
+                        {promptCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{promptCopied ? '¡Prompt Copiado!' : 'Copiar Prompt IA'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {showPromptPreview && (
+                    <pre className="bg-slate-900 text-teal-200 p-2.5 rounded-xl text-[10px] font-mono max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-slate-800">
+                      {GARMIN_AI_BRIDGE_PROMPT}
+                    </pre>
+                  )}
+
+                  {/* Step 2: Paste JSON */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-700">
+                        <strong className="text-indigo-950">Paso 2:</strong> Pega el JSON que te devolvió la IA
+                      </span>
+                      {bridgeJsonInput && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBridgeJsonInput('');
+                            setBridgeFeedback(null);
+                          }}
+                          className="text-[10px] text-slate-500 hover:text-rose-600 font-bold cursor-pointer"
+                        >
+                          Limpiar
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={bridgeJsonInput}
+                      onChange={(e) => {
+                        setBridgeJsonInput(e.target.value);
+                        if (bridgeFeedback) setBridgeFeedback(null);
+                      }}
+                      placeholder={'Pega aquí el JSON devuelto por ChatGPT / Gemini / Claude...\nEj: { "tipo": "Piscina", "distancia_metros": 1000, "tiempo_total": "0:26:40", ... }'}
+                      className="w-full px-2.5 py-2 rounded-xl border border-indigo-200 bg-white font-mono text-[11px] text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                    />
+
+                    {/* Live Preview of Parsed Sessions */}
+                    {parsedBridgePreview && parsedBridgePreview.sessions.length > 0 && (
+                      <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-950 space-y-1">
+                        <div className="font-bold flex items-center justify-between">
+                          <span>
+                            ✅ {parsedBridgePreview.sessions.length} actividad(es) detectada(s) lista(s) para importar:
+                          </span>
+                        </div>
+                        {parsedBridgePreview.sessions.map((s) => (
+                          <div key={s.id} className="font-mono text-[10px] text-emerald-900 bg-white/80 px-2 py-1 rounded-lg border border-emerald-100">
+                            <strong>{s.subtipo_garmin || s.tipo}</strong> ·{' '}
+                            {s.tipo === 'Piscina' ? `${s.distancia_metros || Math.round(s.distancia_km * 1000)} m` : `${s.distancia_km} km`} ·{' '}
+                            {s.tiempo_formato} · {s.ritmo_min_km}
+                            {s.calorias_totales ? ` · ${s.calorias_totales} kcal` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {parsedBridgePreview?.error && bridgeJsonInput.trim().length > 10 && (
+                      <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[10px] text-amber-900 flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                        <span>{parsedBridgePreview.error}</span>
+                      </div>
+                    )}
+
+                    {bridgeFeedback && (
+                      <div
+                        className={`p-2 rounded-xl text-[11px] font-semibold border ${
+                          bridgeFeedback.kind === 'success'
+                            ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
+                            : 'bg-rose-50 border-rose-200 text-rose-800'
+                        }`}
+                      >
+                        {bridgeFeedback.text}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleBridgeLoadIntoForm}
+                        disabled={!bridgeJsonInput.trim()}
+                        className="py-1.5 px-2.5 rounded-xl bg-white hover:bg-indigo-50 disabled:opacity-40 text-indigo-900 border border-indigo-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Cargar en Formulario</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleBridgeSaveDirect}
+                        disabled={!bridgeJsonInput.trim()}
+                        className="py-1.5 px-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Guardar Directo</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleRegisterOutdoorRoute} className="space-y-3.5 text-xs">
-              {/* Type Switcher */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Type Switcher (Caminata / Bicicleta / Piscina) */}
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     setRouteType('Caminata');
+                    setRouteSubtype('');
                     setCompareActivityFilter('Caminata');
                   }}
-                  className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-2 px-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     routeType === 'Caminata'
                       ? 'bg-emerald-700 text-white shadow-xs'
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
@@ -1876,9 +2565,10 @@ export const FitStudioEngineView: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setRouteType('Bicicleta');
+                    setRouteSubtype('');
                     setCompareActivityFilter('Bicicleta');
                   }}
-                  className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-2 px-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     routeType === 'Bicicleta'
                       ? 'bg-emerald-700 text-white shadow-xs'
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
@@ -1887,35 +2577,53 @@ export const FitStudioEngineView: React.FC = () => {
                   <Bike className="w-4 h-4" />
                   <span>Bicicleta</span>
                 </button>
-              </div>
-
-              {/* Input Mode Switcher: Garmin Connect Direct vs Distancia+Tiempo */}
-              <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1 text-[11px] font-bold">
                 <button
                   type="button"
-                  onClick={() => setOutdoorInputMode('garmin')}
-                  className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
-                    outdoorInputMode === 'garmin'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                  onClick={() => {
+                    setRouteType('Piscina');
+                    setRouteSubtype('');
+                    setCompareActivityFilter('Piscina');
+                  }}
+                  className={`py-2 px-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    routeType === 'Piscina'
+                      ? 'bg-sky-700 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                   }`}
                 >
-                  Copiar App Garmin (Directo)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOutdoorInputMode('distancia')}
-                  className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
-                    outdoorInputMode === 'distancia'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Calcular por Distancia (km)
+                  <Waves className="w-4 h-4" />
+                  <span>Piscina</span>
                 </button>
               </div>
 
-              {/* Date Picker & Optional Route Name */}
+              {/* Input Mode Switcher (solo Caminata / Bicicleta) */}
+              {routeType !== 'Piscina' && (
+                <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1 text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setOutdoorInputMode('garmin')}
+                    className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
+                      outdoorInputMode === 'garmin'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Copiar App Garmin (Directo)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOutdoorInputMode('distancia')}
+                    className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
+                      outdoorInputMode === 'distancia'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Calcular por Distancia (km)
+                  </button>
+                </div>
+              )}
+
+              {/* Date Picker & Optional Route/Pool Name */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-emerald-50/60 p-3 rounded-2xl border border-emerald-200/70">
                 <div>
                   <label className="font-bold text-emerald-950 flex items-center gap-1 mb-1">
@@ -1943,13 +2651,13 @@ export const FitStudioEngineView: React.FC = () => {
                 <div>
                   <label className="font-bold text-emerald-950 flex items-center gap-1 mb-1">
                     <MapPin className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Nombre de Ruta (opcional):</span>
+                    <span>{routeType === 'Piscina' ? 'Piscina / Sesión (opc.):' : 'Nombre de Ruta (opcional):'}</span>
                   </label>
                   <input
                     type="text"
                     value={routeName}
                     onChange={(e) => setRouteName(e.target.value)}
-                    placeholder="Ej. Ruta Río, Subida Ermita"
+                    placeholder={routeType === 'Piscina' ? 'Ej. Piscina 25m Técnica' : 'Ej. Ruta Río, Subida Ermita'}
                     className="w-full px-3 py-1.5 rounded-xl border border-emerald-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
                   />
                 </div>
@@ -1975,139 +2683,251 @@ export const FitStudioEngineView: React.FC = () => {
                 )}
               </div>
 
-              {/* GARMIN SECTION 1: RITMO & VELOCIDAD */}
-              {outdoorInputMode === 'garmin' && (
-                <div className="space-y-2.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                      1. Ritmo y Velocidad (Garmin Estadísticas)
+              {routeType === 'Piscina' ? (
+                /* ================= FORMULARIO PISCINA GARMIN ================= */
+                <div className="space-y-3">
+                  <div className="bg-sky-50/70 p-3 rounded-2xl border border-sky-200 space-y-2.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-sky-900 block">
+                      1. Distancia y Piscina (Garmin Natación)
                     </span>
-                    <span className="text-[10px] text-teal-700 font-bold">Directo de tu reloj</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Distancia (m):</label>
+                        <input
+                          type="number"
+                          value={poolDistanceMeters}
+                          onChange={(e) => setPoolDistanceMeters(e.target.value)}
+                          placeholder="1000"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-sky-300 bg-white font-bold font-mono text-sky-950 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Piscina (m):</label>
+                        <select
+                          value={poolLengthMeters}
+                          onChange={(e) => setPoolLengthMeters(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        >
+                          <option value="25">25 m</option>
+                          <option value="50">50 m</option>
+                          <option value="20">20 m</option>
+                          <option value="33">33 m</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Largos:</label>
+                        <input
+                          type="number"
+                          value={poolLengths}
+                          onChange={(e) => setPoolLengths(e.target.value)}
+                          placeholder={String(liveOutdoorMetrics.computedLengths || 40)}
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Tiempo total:</label>
+                        <input
+                          type="text"
+                          value={routeTime}
+                          onChange={(e) => setRouteTime(e.target.value)}
+                          placeholder="0:26:40"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo medio (/100m):</label>
+                        <input
+                          type="text"
+                          value={routePaceAvg}
+                          onChange={(e) => setRoutePaceAvg(e.target.value)}
+                          placeholder="2:40"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo medio:</label>
-                      <input
-                        type="text"
-                        value={routePaceAvg}
-                        onChange={(e) => setRoutePaceAvg(e.target.value)}
-                        placeholder="13:58"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo movim.:</label>
-                      <input
-                        type="text"
-                        value={routePaceMoving}
-                        onChange={(e) => setRoutePaceMoving(e.target.value)}
-                        placeholder="13:56"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo óptimo:</label>
-                      <input
-                        type="text"
-                        value={routePaceBest}
-                        onChange={(e) => setRoutePaceBest(e.target.value)}
-                        placeholder="11:18"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. media (km/h):</label>
-                      <input
-                        type="text"
-                        value={routeSpeedAvg}
-                        onChange={(e) => setRouteSpeedAvg(e.target.value)}
-                        placeholder="4,3"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-white font-bold font-mono text-emerald-900 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. mov. (km/h):</label>
-                      <input
-                        type="text"
-                        value={routeSpeedMoving}
-                        onChange={(e) => setRouteSpeedMoving(e.target.value)}
-                        placeholder="4,3"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. máx. (km/h):</label>
-                      <input
-                        type="text"
-                        value={routeSpeedMax}
-                        onChange={(e) => setRouteSpeedMax(e.target.value)}
-                        placeholder="5,3"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                      />
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                      2. Técnica de Brazada y SWOLF
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">SWOLF medio:</label>
+                        <input
+                          type="number"
+                          value={poolSwolf}
+                          onChange={(e) => setPoolSwolf(e.target.value)}
+                          placeholder="42"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Brazadas/largo:</label>
+                        <input
+                          type="text"
+                          value={poolStrokesPerLength}
+                          onChange={(e) => setPoolStrokesPerLength(e.target.value)}
+                          placeholder="16"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Brazadas total:</label>
+                        <input
+                          type="number"
+                          value={poolStrokesTotal}
+                          onChange={(e) => setPoolStrokesTotal(e.target.value)}
+                          placeholder="640"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-sky-600 focus:outline-hidden"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
+              ) : (
+                /* ================= FORMULARIO CAMINATA / CARRERA / BICICLETA ================= */
+                <>
+                  {/* GARMIN SECTION 1: RITMO & VELOCIDAD */}
+                  {outdoorInputMode === 'garmin' && (
+                    <div className="space-y-2.5 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          1. Ritmo y Velocidad (Garmin Estadísticas)
+                        </span>
+                        <span className="text-[10px] text-teal-700 font-bold">Directo de tu reloj</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo medio:</label>
+                          <input
+                            type="text"
+                            value={routePaceAvg}
+                            onChange={(e) => setRoutePaceAvg(e.target.value)}
+                            placeholder="13:58"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo movim.:</label>
+                          <input
+                            type="text"
+                            value={routePaceMoving}
+                            onChange={(e) => setRoutePaceMoving(e.target.value)}
+                            placeholder="13:56"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Ritmo óptimo:</label>
+                          <input
+                            type="text"
+                            value={routePaceBest}
+                            onChange={(e) => setRoutePaceBest(e.target.value)}
+                            placeholder="11:18"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. media (km/h):</label>
+                          <input
+                            type="text"
+                            value={routeSpeedAvg}
+                            onChange={(e) => setRouteSpeedAvg(e.target.value)}
+                            placeholder="4,3"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-white font-bold font-mono text-emerald-900 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. mov. (km/h):</label>
+                          <input
+                            type="text"
+                            value={routeSpeedMoving}
+                            onChange={(e) => setRouteSpeedMoving(e.target.value)}
+                            placeholder="4,3"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1 text-[11px]">Vel. máx. (km/h):</label>
+                          <input
+                            type="text"
+                            value={routeSpeedMax}
+                            onChange={(e) => setRouteSpeedMax(e.target.value)}
+                            placeholder="5,3"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* GARMIN SECTION 2: TIEMPO & DISTANCIA */}
+                  <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                      {outdoorInputMode === 'garmin' ? '2. Tiempo y Distancia' : '1. Distancia y Tiempo'}
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Tiempo total:</label>
+                        <input
+                          type="text"
+                          value={routeTime}
+                          onChange={(e) => setRouteTime(e.target.value)}
+                          placeholder="1:33:16"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Tiempo en movim.:</label>
+                        <input
+                          type="text"
+                          value={routeMovingTime}
+                          onChange={(e) => setRouteMovingTime(e.target.value)}
+                          placeholder="1:33:01"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">
+                          {outdoorInputMode === 'garmin' ? 'Distancia km (opc.):' : 'Distancia (km):'}
+                        </label>
+                        <input
+                          type="text"
+                          value={routeDistance}
+                          onChange={(e) => setRouteDistance(e.target.value)}
+                          placeholder={outdoorInputMode === 'garmin' ? 'Auto (~6,68)' : 'Ej. 6,74'}
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
+                          required={outdoorInputMode === 'distancia'}
+                        />
+                      </div>
+                    </div>
+                    {outdoorInputMode === 'garmin' && (
+                      <span className="text-[10px] text-slate-500 block">
+                        Si dejas Distancia vacía, se calcula automáticamente con <strong>Tiempo total × Vel. media</strong> (
+                        <strong className="text-emerald-800 font-mono">{liveOutdoorMetrics.distanciaKm} km</strong>).
+                      </span>
+                    )}
+                  </div>
+                </>
               )}
 
-              {/* GARMIN SECTION 2: TIEMPO & DISTANCIA */}
-              <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
-                  {outdoorInputMode === 'garmin' ? '2. Tiempo y Distancia' : '1. Distancia y Tiempo'}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">Tiempo total:</label>
-                    <input
-                      type="text"
-                      value={routeTime}
-                      onChange={(e) => setRouteTime(e.target.value)}
-                      placeholder="1:33:16"
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">Tiempo en movim.:</label>
-                    <input
-                      type="text"
-                      value={routeMovingTime}
-                      onChange={(e) => setRouteMovingTime(e.target.value)}
-                      placeholder="1:33:01"
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">
-                      {outdoorInputMode === 'garmin' ? 'Distancia km (opc.):' : 'Distancia (km):'}
-                    </label>
-                    <input
-                      type="text"
-                      value={routeDistance}
-                      onChange={(e) => setRouteDistance(e.target.value)}
-                      placeholder={outdoorInputMode === 'garmin' ? 'Auto (~6,68)' : 'Ej. 6,74'}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden font-mono"
-                      required={outdoorInputMode === 'distancia'}
-                    />
-                  </div>
-                </div>
-                {outdoorInputMode === 'garmin' && (
-                  <span className="text-[10px] text-slate-500 block">
-                    Si dejas Distancia vacía, se calcula automáticamente con <strong>Tiempo total × Vel. media</strong> (
-                    <strong className="text-emerald-800 font-mono">{liveOutdoorMetrics.distanciaKm} km</strong>).
-                  </span>
-                )}
-              </div>
-
-              {/* GARMIN SECTION 3: FRECUENCIA CARDIACA & TRAINING EFFECT */}
-              <div className="grid grid-cols-3 gap-2">
+              {/* GARMIN SECTION 3: FRECUENCIA CARDIACA & TRAINING EFFECT (Común) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className="font-bold text-rose-800 flex items-center gap-1 mb-1 text-[11px]">
                     <Heart className="w-3 h-3 text-rose-600" />
-                    <span>FC Media (ppm):</span>
+                    <span>FC Media:</span>
                   </label>
                   <input
                     type="number"
@@ -2120,7 +2940,7 @@ export const FitStudioEngineView: React.FC = () => {
                 <div>
                   <label className="font-bold text-rose-900 flex items-center gap-1 mb-1 text-[11px]">
                     <Heart className="w-3 h-3 text-rose-700" />
-                    <span>FC Máx (ppm):</span>
+                    <span>FC Máx:</span>
                   </label>
                   <input
                     type="number"
@@ -2133,7 +2953,7 @@ export const FitStudioEngineView: React.FC = () => {
                 <div>
                   <label className="font-bold text-indigo-900 flex items-center gap-1 mb-1 text-[11px]">
                     <Gauge className="w-3 h-3 text-indigo-600" />
-                    <span>TE Aeróbica:</span>
+                    <span>TE Aerób.:</span>
                   </label>
                   <input
                     type="text"
@@ -2143,96 +2963,7 @@ export const FitStudioEngineView: React.FC = () => {
                     className="w-full px-2.5 py-1.5 rounded-xl border border-indigo-300 bg-indigo-50/30 font-semibold text-slate-800 font-mono focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
                   />
                 </div>
-              </div>
-
-              {/* GARMIN SECTION 4: DINÁMICA DE CARRERA / CAMINATA */}
-              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
-                  Dinámica (Cadencia y Zancada)
-                </span>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">Cad. media (ppm):</label>
-                    <input
-                      type="number"
-                      value={routeCadenceAvg}
-                      onChange={(e) => setRouteCadenceAvg(e.target.value)}
-                      placeholder="104"
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">Cad. máx. (ppm):</label>
-                    <input
-                      type="number"
-                      value={routeCadenceMax}
-                      onChange={(e) => setRouteCadenceMax(e.target.value)}
-                      placeholder="205"
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1 text-[11px]">Zancada (m):</label>
-                    <input
-                      type="text"
-                      value={routeStrideLength}
-                      onChange={(e) => setRouteStrideLength(e.target.value)}
-                      placeholder="0,69"
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* GARMIN SECTION 5: ALTITUD & CALORÍAS */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 <div>
-                  <label className="font-bold text-emerald-800 flex items-center gap-0.5 mb-1 text-[11px]">
-                    <ArrowUp className="w-3 h-3 text-emerald-600" />
-                    <span>Ascenso (m):</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={routeElevGain}
-                    onChange={(e) => setRouteElevGain(e.target.value)}
-                    placeholder="224"
-                    className="w-full px-2 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50/30 font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-amber-800 flex items-center gap-0.5 mb-1 text-[11px]">
-                    <ArrowDown className="w-3 h-3 text-amber-600" />
-                    <span>Descenso (m):</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={routeElevLoss}
-                    onChange={(e) => setRouteElevLoss(e.target.value)}
-                    placeholder="219"
-                    className="w-full px-2 py-1.5 rounded-xl border border-amber-300 bg-amber-50/30 font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1 text-[11px]">Alt. mín (m):</label>
-                  <input
-                    type="number"
-                    value={routeAltitudeMin}
-                    onChange={(e) => setRouteAltitudeMin(e.target.value)}
-                    placeholder="81"
-                    className="w-full px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1 text-[11px]">Alt. máx (m):</label>
-                  <input
-                    type="number"
-                    value={routeAltitude}
-                    onChange={(e) => setRouteAltitude(e.target.value)}
-                    placeholder="313"
-                    className="w-full px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
-                  />
-                </div>
-                <div className="col-span-2 sm:col-span-1">
                   <label className="font-bold text-orange-800 flex items-center gap-0.5 mb-1 text-[11px]">
                     <Flame className="w-3 h-3 text-orange-600" />
                     <span>Calorías:</span>
@@ -2242,10 +2973,102 @@ export const FitStudioEngineView: React.FC = () => {
                     value={routeCalories}
                     onChange={(e) => setRouteCalories(e.target.value)}
                     placeholder="589"
-                    className="w-full px-2 py-1.5 rounded-xl border border-orange-300 bg-orange-50/40 font-bold font-mono text-orange-950 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                    className="w-full px-2.5 py-1.5 rounded-xl border border-orange-300 bg-orange-50/40 font-bold font-mono text-orange-950 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
                   />
                 </div>
               </div>
+
+              {/* GARMIN SECTION 4 & 5: DINÁMICA Y ALTITUD (Solo Caminata / Bicicleta) */}
+              {routeType !== 'Piscina' && (
+                <>
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                      Dinámica (Cadencia y Zancada)
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Cad. media (ppm):</label>
+                        <input
+                          type="number"
+                          value={routeCadenceAvg}
+                          onChange={(e) => setRouteCadenceAvg(e.target.value)}
+                          placeholder="104"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Cad. máx. (ppm):</label>
+                        <input
+                          type="number"
+                          value={routeCadenceMax}
+                          onChange={(e) => setRouteCadenceMax(e.target.value)}
+                          placeholder="205"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1 text-[11px]">Zancada (m):</label>
+                        <input
+                          type="text"
+                          value={routeStrideLength}
+                          onChange={(e) => setRouteStrideLength(e.target.value)}
+                          placeholder="0,69"
+                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <label className="font-bold text-emerald-800 flex items-center gap-0.5 mb-1 text-[11px]">
+                        <ArrowUp className="w-3 h-3 text-emerald-600" />
+                        <span>Ascenso (m):</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={routeElevGain}
+                        onChange={(e) => setRouteElevGain(e.target.value)}
+                        placeholder="224"
+                        className="w-full px-2 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50/30 font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-amber-800 flex items-center gap-0.5 mb-1 text-[11px]">
+                        <ArrowDown className="w-3 h-3 text-amber-600" />
+                        <span>Descenso (m):</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={routeElevLoss}
+                        onChange={(e) => setRouteElevLoss(e.target.value)}
+                        placeholder="219"
+                        className="w-full px-2 py-1.5 rounded-xl border border-amber-300 bg-amber-50/30 font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Alt. mín (m):</label>
+                      <input
+                        type="number"
+                        value={routeAltitudeMin}
+                        onChange={(e) => setRouteAltitudeMin(e.target.value)}
+                        placeholder="81"
+                        className="w-full px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1 text-[11px]">Alt. máx (m):</label>
+                      <input
+                        type="number"
+                        value={routeAltitude}
+                        onChange={(e) => setRouteAltitude(e.target.value)}
+                        placeholder="313"
+                        className="w-full px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-semibold font-mono text-slate-800 focus:ring-2 focus:ring-emerald-600 focus:outline-hidden"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Live Auto Calculation Card */}
               <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80 space-y-2">
@@ -2254,13 +3077,21 @@ export const FitStudioEngineView: React.FC = () => {
                     Resumen Calculado (Listo para Guardar):
                   </span>
                   <span className="text-[10px] text-emerald-800 font-bold bg-emerald-200/60 px-2 py-0.5 rounded-full">
-                    {liveOutdoorMetrics.distIsEstimated ? 'Distancia deducida Garmin' : 'Garmin Calibrado'}
+                    {routeType === 'Piscina'
+                      ? 'Garmin Natación'
+                      : liveOutdoorMetrics.distIsEstimated
+                      ? 'Distancia deducida Garmin'
+                      : 'Garmin Calibrado'}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <div className="bg-white p-2 rounded-xl border border-emerald-100">
                     <span className="text-slate-500 text-[10px] block">Distancia:</span>
-                    <strong className="text-emerald-900 font-mono text-xs">{liveOutdoorMetrics.distanciaKm} km</strong>
+                    <strong className="text-emerald-900 font-mono text-xs">
+                      {routeType === 'Piscina'
+                        ? `${liveOutdoorMetrics.distanciaMetros} m`
+                        : `${liveOutdoorMetrics.distanciaKm} km`}
+                    </strong>
                   </div>
                   <div className="bg-white p-2 rounded-xl border border-emerald-100">
                     <span className="text-slate-500 text-[10px] block">Tiempo:</span>
@@ -2314,7 +3145,7 @@ export const FitStudioEngineView: React.FC = () => {
                 type="submit"
                 className="w-full py-3 px-4 rounded-xl font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] transition-all cursor-pointer shadow-sm text-center"
               >
-                Guardar Ruta en Fecha ({formatSpanishDateBadge(routeDate)})
+                Guardar {routeType} en Fecha ({formatSpanishDateBadge(routeDate)})
               </button>
             </form>
           </div>
@@ -2339,7 +3170,7 @@ export const FitStudioEngineView: React.FC = () => {
                   {(
                     [
                       { id: 'velocidad', label: 'Vel. (km/h)' },
-                      { id: 'ritmo', label: 'Ritmo (/km)' },
+                      { id: 'ritmo', label: compareActivityFilter === 'Piscina' ? 'Ritmo (/100m)' : 'Ritmo (/km)' },
                       { id: 'fc', label: 'FC (ppm)' },
                       { id: 'calorias', label: 'Calorías' }
                     ] as const
@@ -2361,7 +3192,7 @@ export const FitStudioEngineView: React.FC = () => {
               {/* Filter Controls */}
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <div className="inline-flex rounded-xl bg-slate-100 p-1 font-bold">
-                  {(['Caminata', 'Bicicleta', 'Todas'] as const).map((typeOpt) => (
+                  {(['Caminata', 'Bicicleta', 'Piscina', 'Todas'] as const).map((typeOpt) => (
                     <button
                       key={typeOpt}
                       type="button"
@@ -2371,7 +3202,9 @@ export const FitStudioEngineView: React.FC = () => {
                       }}
                       className={`px-2.5 py-1 rounded-lg text-[11px] transition-all cursor-pointer ${
                         compareActivityFilter === typeOpt
-                          ? 'bg-emerald-700 text-white shadow-2xs'
+                          ? typeOpt === 'Piscina'
+                            ? 'bg-sky-700 text-white shadow-2xs'
+                            : 'bg-emerald-700 text-white shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
@@ -2429,7 +3262,7 @@ export const FitStudioEngineView: React.FC = () => {
                       ? compareMetric === 'velocidad'
                         ? `${outdoorChartData.meanValue.toFixed(2)} km/h`
                         : compareMetric === 'ritmo'
-                        ? `${formatDecimalMinutesAsPace(outdoorChartData.meanValue)} min/km`
+                        ? `${formatDecimalMinutesAsPace(outdoorChartData.meanValue)} ${compareActivityFilter === 'Piscina' ? 'min/100m' : 'min/km'}`
                         : compareMetric === 'fc'
                         ? `${Math.round(outdoorChartData.meanValue)} ppm`
                         : `${Math.round(outdoorChartData.meanValue)} kcal`
@@ -2445,7 +3278,7 @@ export const FitStudioEngineView: React.FC = () => {
                       ? compareMetric === 'velocidad'
                         ? `${outdoorChartData.bestPoint.value.toFixed(2)} km/h`
                         : compareMetric === 'ritmo'
-                        ? `${formatDecimalMinutesAsPace(outdoorChartData.bestPoint.value)} min/km`
+                        ? `${formatDecimalMinutesAsPace(outdoorChartData.bestPoint.value)} ${compareActivityFilter === 'Piscina' ? 'min/100m' : 'min/km'}`
                         : compareMetric === 'fc'
                         ? `${Math.round(outdoorChartData.bestPoint.value)} ppm`
                         : `${Math.round(outdoorChartData.bestPoint.value)} kcal`
@@ -2470,7 +3303,7 @@ export const FitStudioEngineView: React.FC = () => {
                           : compareMetric === 'ritmo'
                           ? `${outdoorChartData.latestDelta >= 0 ? '+' : '-'}${formatDecimalMinutesAsPace(
                               Math.abs(outdoorChartData.latestDelta)
-                            )} min/km`
+                            )} ${compareActivityFilter === 'Piscina' ? 'min/100m' : 'min/km'}`
                           : compareMetric === 'fc'
                           ? `${outdoorChartData.latestDelta >= 0 ? '+' : ''}${Math.round(outdoorChartData.latestDelta)} ppm`
                           : `${outdoorChartData.latestDelta >= 0 ? '+' : ''}${Math.round(outdoorChartData.latestDelta)} kcal`;
@@ -2561,7 +3394,7 @@ export const FitStudioEngineView: React.FC = () => {
                       compareMetric === 'velocidad'
                         ? `${mean.toFixed(2)} km/h`
                         : compareMetric === 'ritmo'
-                        ? `${formatDecimalMinutesAsPace(mean)} /km`
+                        ? `${formatDecimalMinutesAsPace(mean)} ${compareActivityFilter === 'Piscina' ? '/100m' : '/km'}`
                         : compareMetric === 'fc'
                         ? `${Math.round(mean)} ppm`
                         : `${Math.round(mean)} kcal`;
@@ -2695,8 +3528,11 @@ export const FitStudioEngineView: React.FC = () => {
 
                           {hoveredPoint && (
                             <div className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 font-mono text-[10px] text-slate-800">
-                              <strong>{hoveredPoint.dateLabel}</strong> · {hoveredPoint.item.distancia_km} km ·{' '}
-                              <strong>{hoveredPoint.speed.toFixed(2)} km/h</strong> ({hoveredPoint.item.ritmo_min_km})
+                              <strong>{hoveredPoint.dateLabel}</strong> ·{' '}
+                              {hoveredPoint.item.tipo === 'Piscina'
+                                ? `${hoveredPoint.item.distancia_metros || Math.round(hoveredPoint.item.distancia_km * 1000)} m`
+                                : `${hoveredPoint.item.distancia_km} km`}{' '}
+                              · <strong>{hoveredPoint.speed.toFixed(2)} km/h</strong> ({hoveredPoint.item.ritmo_min_km})
                             </div>
                           )}
                         </div>
@@ -2747,12 +3583,26 @@ export const FitStudioEngineView: React.FC = () => {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5">
-                          <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-800 shrink-0">
-                            {item.tipo === 'Caminata' ? <Footprints className="w-4 h-4" /> : <Bike className="w-4 h-4" />}
+                          <span
+                            className={`p-1.5 rounded-lg shrink-0 ${
+                              item.tipo === 'Piscina'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {item.tipo === 'Piscina' ? (
+                              <Waves className="w-4 h-4" />
+                            ) : item.tipo === 'Caminata' ? (
+                              <Footprints className="w-4 h-4" />
+                            ) : (
+                              <Bike className="w-4 h-4" />
+                            )}
                           </span>
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <strong className="text-slate-900 text-sm">{item.tipo}</strong>
+                              <strong className="text-slate-900 text-sm">
+                                {item.subtipo_garmin || item.tipo}
+                              </strong>
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 font-bold text-[10px]">
                                 <Calendar className="w-3 h-3 text-emerald-700" />
                                 {formatSpanishDateBadge(iso)}
@@ -2769,8 +3619,14 @@ export const FitStudioEngineView: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-mono font-bold text-emerald-800 text-sm">
-                            {item.distancia_km} km
+                          <span
+                            className={`font-mono font-bold text-sm ${
+                              item.tipo === 'Piscina' ? 'text-sky-800' : 'text-emerald-800'
+                            }`}
+                          >
+                            {item.tipo === 'Piscina'
+                              ? `${item.distancia_metros || Math.round(item.distancia_km * 1000)} m`
+                              : `${item.distancia_km} km`}
                           </span>
 
                           {confirmDeleteOutdoorId === item.id ? (
@@ -2794,7 +3650,7 @@ export const FitStudioEngineView: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteOutdoorId(item.id)}
-                              title="Eliminar ruta"
+                              title="Eliminar actividad"
                               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2803,30 +3659,62 @@ export const FitStudioEngineView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Tiempo (Garmin)</span>
-                          <strong className="text-slate-800 font-mono">
-                            {item.tiempo_formato || formatMinutesToGarminTime(item.tiempo_minutos)}
-                          </strong>
+                      {item.tipo === 'Piscina' ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Tiempo (Garmin)</span>
+                            <strong className="text-slate-800 font-mono">
+                              {item.tiempo_formato || formatMinutesToGarminTime(item.tiempo_minutos)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Ritmo /100m</span>
+                            <strong className="text-sky-800 font-mono">{item.ritmo_min_km}</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Largos</span>
+                            <strong className="text-slate-800 font-mono">
+                              {item.largos_totales || '—'}
+                              {item.longitud_piscina_m ? ` (${item.longitud_piscina_m}m)` : ''}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">SWOLF</span>
+                            <strong className="text-indigo-800 font-mono">{item.swolf_medio || '—'}</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Brazadas</span>
+                            <strong className="text-slate-800 font-mono">
+                              {item.brazadas_por_largo ? `${item.brazadas_por_largo}/largo` : item.brazadas_totales || '—'}
+                            </strong>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Velocidad</span>
-                          <strong className="text-teal-800 font-mono">{speed.toFixed(2)} km/h</strong>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200/70 text-[11px]">
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Tiempo (Garmin)</span>
+                            <strong className="text-slate-800 font-mono">
+                              {item.tiempo_formato || formatMinutesToGarminTime(item.tiempo_minutos)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Velocidad</span>
+                            <strong className="text-teal-800 font-mono">{speed.toFixed(2)} km/h</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Ritmo</span>
+                            <strong className="text-slate-800 font-mono">{item.ritmo_min_km}</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Ascenso (+)</span>
+                            <strong className="text-emerald-700 font-mono">+{item.desnivel_positivo_m}m</strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Descenso (-)</span>
+                            <strong className="text-amber-700 font-mono">-{item.desnivel_negativo_m}m</strong>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Ritmo</span>
-                          <strong className="text-slate-800 font-mono">{item.ritmo_min_km}</strong>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Ascenso (+)</span>
-                          <strong className="text-emerald-700 font-mono">+{item.desnivel_positivo_m}m</strong>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Descenso (-)</span>
-                          <strong className="text-amber-700 font-mono">-{item.desnivel_negativo_m}m</strong>
-                        </div>
-                      </div>
+                      )}
 
                       {/* Extended Garmin Connect Stats Badges when present */}
                       {(item.calorias_totales ||
@@ -2834,7 +3722,8 @@ export const FitStudioEngineView: React.FC = () => {
                         item.cadencia_media_ppm ||
                         item.longitud_zancada_m ||
                         item.velocidad_maxima_kmh ||
-                        item.ritmo_optimo) && (
+                        item.ritmo_optimo ||
+                        item.brazadas_totales) && (
                         <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
                           {item.calorias_totales ? (
                             <span className="px-2 py-0.5 rounded-md bg-orange-50 text-orange-900 border border-orange-200 font-bold">
@@ -2844,6 +3733,11 @@ export const FitStudioEngineView: React.FC = () => {
                           {item.training_effect_aerobico ? (
                             <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-900 border border-indigo-200 font-bold">
                               TE Aeróbica: {item.training_effect_aerobico}
+                            </span>
+                          ) : null}
+                          {item.brazadas_totales ? (
+                            <span className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-900 border border-sky-200 font-bold">
+                              Brazadas totales: {item.brazadas_totales}
                             </span>
                           ) : null}
                           {item.cadencia_media_ppm ? (
