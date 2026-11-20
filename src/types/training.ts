@@ -70,3 +70,138 @@ export interface TrackingEntry {
   notes: string;
 }
 
+export type TrainingEnvironment = 'gym' | 'home' | 'hybrid';
+export type ExperienceLevel = 'principiante' | 'intermedio';
+export type TrainingGoalOption = 'perder_grasa' | 'ganar_fuerza' | 'salud_general';
+export type SplitPreference = 'full_body' | 'upper_lower';
+
+export type MovementPatternId =
+  | 'empuje_horizontal'
+  | 'tiron_vertical'
+  | 'tiron_horizontal'
+  | 'pierna_rodilla'
+  | 'pierna_cadera'
+  | 'core'
+  | 'empuje_vertical'
+  | 'accesorios';
+
+export type GymEquipmentId =
+  | 'maquinas_guiadas'
+  | 'poleas'
+  | 'mancuernas'
+  | 'barras'
+  | 'cardio_cinta_eliptica'
+  | 'entrenador_sala';
+
+export type HomeMaterialId =
+  | 'silla_estable'
+  | 'escalon_step'
+  | 'cojin_equilibrio'
+  | 'gomas_elasticas'
+  | 'mancuernas_pesas'
+  | 'esterilla'
+  | 'cinta_andar'
+  | 'eliptica'
+  | 'bici_estatica'
+  | 'barra_puerta_trx'
+  | 'pared';
+
+export type DaySlotRole =
+  | 'fuerza_a'
+  | 'fuerza_b'
+  | 'fuerza_full'
+  | 'torso'
+  | 'pierna'
+  | 'solo_cardio'
+  | 'descanso_activo';
+
+export type DayCardioOption =
+  | 'caminata_desnivel'
+  | 'cinta_inclinacion'
+  | 'eliptica_suave'
+  | 'bici_estatica'
+  | 'paseo_llano'
+  | 'recuperacion_activa'
+  | 'ninguno';
+
+export interface CustomDayAssignment {
+  dayId: 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes' | 'sabado' | 'domingo';
+  dayName: string;
+  role: DaySlotRole;
+  cardioType: DayCardioOption;
+  cardioDurationMinutes: number;
+  distanceKm: number;
+  elevationGainM: number;
+  elevationLossM: number;
+  note?: string;
+}
+
+export interface TrainingLimitations {
+  knees: boolean;
+  lowerBack: boolean;
+  shoulders: boolean;
+  overweightHighBmi: boolean;
+  over50: boolean;
+  over60: boolean;
+  hypertensionOrCardiacOrDiabetes: boolean;
+  priorSurgeriesOrMeds: string;
+  femaleGluteEmphasis: boolean;
+}
+
+export interface TrainingConfiguratorState {
+  environment: TrainingEnvironment;
+  experience: ExperienceLevel;
+  goal: TrainingGoalOption;
+  daysPerWeek: 2 | 3 | 4;
+  sessionMinutes: 30 | 45 | 60;
+  splitPreference: SplitPreference;
+  includeOptionalPatterns: boolean;
+  limitations: TrainingLimitations;
+  gymEquipment: Record<GymEquipmentId, boolean>;
+  homeMaterial: Record<HomeMaterialId, boolean>;
+  useHomemadeAlternatives: boolean;
+  gymDescriptionNote: string;
+  customSchedule: CustomDayAssignment[];
+  updatedAt?: string;
+}
+
+export interface PatternAssignment {
+  patternId: MovementPatternId;
+  patternLabel: string;
+  isOptional?: boolean;
+  exerciseName: string;
+  alternativeVariantB: string;
+  equipmentUsed: string;
+  homemadeFallback?: string;
+  setsReps: string;
+  rirNote: string;
+  restSeconds: number;
+  safetyCue: string;
+}
+
+export interface GeneratedSessionPlan {
+  sessionKey: 'fuerza_a' | 'fuerza_b' | 'fuerza_full' | 'torso' | 'pierna';
+  title: string;
+  warmup: string;
+  patterns: PatternAssignment[];
+  cooldown: string;
+  estimatedMinutes: number;
+}
+
+export interface GeneratedFourWeekProgram {
+  structureTitle: string;
+  structureRationale: string;
+  sessions: Record<string, GeneratedSessionPlan>;
+  weeks: Array<{
+    weekNumber: 1 | 2 | 3 | 4;
+    label: string;
+    isDeload: boolean;
+    setsMultiplierLabel: string;
+    rirTarget: string;
+    progressionNote: string;
+  }>;
+  safetyAlerts: string[];
+  homemadeSafetyRules: string[];
+}
+
+

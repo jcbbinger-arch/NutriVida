@@ -531,6 +531,8 @@ export default function App() {
             activeWeekNumber={activeWeek % 2 === 0 ? 2 : 1}
             onChangeWeek={(w) => setActiveWeek(w)}
             onNavigateToInfographics={() => setActiveTab('infographics')}
+            userProfile={userProfile}
+            effectiveUid={effectiveUid || undefined}
           />
         )}
 

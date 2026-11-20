@@ -27,6 +27,7 @@
         "targetWaterMl": { "type": "number" },
         "scaleFactor": { "type": "number" },
         "onboardingCompleted": { "type": "boolean" },
+        "trainingConfig": { "type": "object" },
         "updatedAt": { "type": "string" }
       },
       "required": ["uid", "name", "age", "currentWeightKg", "heightCm"]

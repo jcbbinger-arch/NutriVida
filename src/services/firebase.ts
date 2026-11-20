@@ -13,7 +13,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { TrackingEntry } from '../types/training';
+import { TrackingEntry, TrainingConfiguratorState } from '../types/training';
 import { UserProfile } from '../types/nutrition';
 import { OutdoorRouteSession, EllipticalSession, StrengthSetLog } from '../components/FitStudioEngineView';
 
@@ -128,6 +128,50 @@ export async function deleteUserProfileFromCloud(userId?: string): Promise<void>
     await deleteDoc(doc(db, 'users', targetUid));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// ================================================
+// TRAINING CONFIGURATOR & CUSTOM 7-DAY SCHEDULE PERSISTENCE
+// ================================================
+export async function loadTrainingConfigFromCloud(
+  userId?: string
+): Promise<TrainingConfiguratorState | null> {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}`;
+  try {
+    const snap = await getDoc(doc(db, 'users', targetUid));
+    if (snap.exists()) {
+      const data = snap.data() as { trainingConfig?: TrainingConfiguratorState };
+      return data.trainingConfig || null;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+export async function saveTrainingConfigToCloud(
+  trainingConfig: TrainingConfiguratorState,
+  userId?: string
+): Promise<boolean> {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}`;
+  try {
+    const sanitized = JSON.parse(
+      JSON.stringify({
+        trainingConfig: {
+          ...trainingConfig,
+          updatedAt: new Date().toISOString()
+        }
+      })
+    );
+    await setDoc(doc(db, 'users', targetUid), sanitized, { merge: true });
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
   }
 }
 
