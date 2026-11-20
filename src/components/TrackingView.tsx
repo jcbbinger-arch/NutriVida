@@ -3,17 +3,13 @@ import {
   PlusCircle,
   History,
   Trash2,
-  Calendar,
-  Scale,
-  Ruler,
   TrendingDown,
-  Info,
   Check,
   Download,
-  RotateCcw,
-  Cloud
+  RotateCcw
 } from 'lucide-react';
 import { TrackingEntry } from '../types/training';
+import { UserProfile } from '../types/nutrition';
 import { INITIAL_TRACKING_ENTRIES } from '../data/trainingDatabase';
 import {
   subscribeMeasurements,
@@ -21,46 +17,101 @@ import {
   deleteMeasurementFromCloud
 } from '../services/firebase';
 
-export const TrackingView: React.FC = () => {
-  const [entries, setEntries] = useState<TrackingEntry[]>(() => {
+interface TrackingViewProps {
+  userProfile?: UserProfile;
+  effectiveUid?: string;
+}
+
+export const TrackingView: React.FC<TrackingViewProps> = ({ userProfile, effectiveUid }) => {
+  const storageKey = effectiveUid
+    ? `nutrivida_user_measurements_${effectiveUid}`
+    : 'nutrivida_user_measurements';
+
+  const buildInitialEntriesForProfile = (): TrackingEntry[] => {
     try {
-      const saved = localStorage.getItem('nutrivida_user_measurements');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const scoped = localStorage.getItem(storageKey);
+      if (scoped) {
+        const parsed = JSON.parse(scoped);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      if (!effectiveUid || effectiveUid === 'juan_fitstudio_user') {
+        const legacy = localStorage.getItem('nutrivida_user_measurements');
+        if (legacy) {
+          const parsedLegacy = JSON.parse(legacy);
+          if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) return parsedLegacy;
+        }
       }
     } catch {
       // fallback
     }
-    return INITIAL_TRACKING_ENTRIES;
-  });
+
+    if (userProfile?.onboardingCompleted && userProfile.currentWeightKg > 0) {
+      if (userProfile.name === 'Juan' && userProfile.currentWeightKg === 102) {
+        return INITIAL_TRACKING_ENTRIES;
+      }
+      return [
+        {
+          id: 'meas-initial-profile',
+          date: new Date().toISOString().slice(0, 10),
+          weekNumber: 0,
+          weightKg: userProfile.currentWeightKg,
+          waistCircumferenceCm: userProfile.waistCm || Math.round(userProfile.heightCm * 0.55),
+          dailySteps: userProfile.dailyStepsTarget || 8000,
+          notes: 'Registro inicial del perfil',
+          kneeSensation: 'sin_molestias',
+          lumbarSensation: 'firme_sin_dolor',
+          adherencePercentage: 100
+        }
+      ];
+    }
+
+    return [];
+  };
+
+  const [entries, setEntries] = useState<TrackingEntry[]>(buildInitialEntriesForProfile);
+
+  // Re-evaluate initial state when UID or profile onboarding status changes
+  useEffect(() => {
+    setEntries(buildInitialEntriesForProfile());
+  }, [storageKey, userProfile?.onboardingCompleted, userProfile?.currentWeightKg, userProfile?.waistCm]);
 
   // Subscribe to real-time Cloud Firestore updates
   useEffect(() => {
-    const unsubscribe = subscribeMeasurements(undefined, (cloudEntries) => {
+    const unsubscribe = subscribeMeasurements(effectiveUid, (cloudEntries) => {
       if (!cloudEntries || cloudEntries.length === 0) return;
       setEntries((prev) => {
         const map = new Map<string, TrackingEntry>();
         prev.forEach((item) => map.set(item.id, item));
         cloudEntries.forEach((item) => map.set(item.id, item));
         const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-        if (prev.length === merged.length && prev.every((item, idx) => item.id === merged[idx]?.id && item.weightKg === merged[idx]?.weightKg && item.waistCircumferenceCm === merged[idx]?.waistCircumferenceCm)) {
+        if (
+          prev.length === merged.length &&
+          prev.every(
+            (item, idx) =>
+              item.id === merged[idx]?.id &&
+              item.weightKg === merged[idx]?.weightKg &&
+              item.waistCircumferenceCm === merged[idx]?.waistCircumferenceCm
+          )
+        ) {
           return prev;
         }
         try {
-          localStorage.setItem('nutrivida_user_measurements', JSON.stringify(merged));
-        } catch {}
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
         return merged;
       });
     });
     return () => unsubscribe();
-  }, []);
+  }, [effectiveUid, storageKey]);
 
-  // Form states matching user screenshot exactly + Garmin steps
-  const [formDate, setFormDate] = useState('2026-11-11');
+  const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formWeight, setFormWeight] = useState('');
   const [formWaist, setFormWaist] = useState('');
-  const [formSteps, setFormSteps] = useState('8500');
+  const [formSteps, setFormSteps] = useState(
+    userProfile?.dailyStepsTarget ? String(userProfile.dailyStepsTarget) : '8000'
+  );
   const [formNotes, setFormNotes] = useState('');
   const [isSyncingGarmin, setIsSyncingGarmin] = useState(false);
   const [hoveredPoint, setHoveredPoint] = useState<{
@@ -83,7 +134,6 @@ export const TrackingView: React.FC = () => {
     setIsSyncingGarmin(true);
     setTimeout(() => {
       setIsSyncingGarmin(false);
-      // Simulate live Garmin sync
       const randomSteps = Math.floor(Math.random() * 2500) + 7500;
       setFormSteps(String(randomSteps));
       showToast(`⌚ Garmin Forerunner 735XT sincronizado: ${randomSteps} pasos importados con éxito.`);
@@ -95,7 +145,7 @@ export const TrackingView: React.FC = () => {
 
     const weightNum = parseFloat(formWeight);
     const waistNum = parseFloat(formWaist);
-    const stepsNum = parseInt(formSteps) || 0;
+    const stepsNum = parseInt(formSteps, 10) || 0;
 
     if (isNaN(weightNum) || isNaN(waistNum)) {
       showToast('Por favor, introduce valores numéricos válidos para peso y cintura.');
@@ -109,83 +159,107 @@ export const TrackingView: React.FC = () => {
       weightKg: Math.round(weightNum * 10) / 10,
       waistCircumferenceCm: Math.round(waistNum * 10) / 10,
       dailySteps: stepsNum,
-      notes: formNotes.trim() || 'Sincronizado Garmin 735XT',
+      notes: formNotes.trim() || 'Registro manual / Garmin 735XT',
       kneeSensation: 'sin_molestias',
       lumbarSensation: 'firme_sin_dolor',
       adherencePercentage: 100
     };
 
-    // Sort chronologically
     const updated = [...entries, newEntry].sort((a, b) => a.date.localeCompare(b.date));
     setEntries(updated);
     try {
-      localStorage.setItem('nutrivida_user_measurements', JSON.stringify(updated));
+      localStorage.setItem(storageKey, JSON.stringify(updated));
     } catch {
       // ignore
     }
 
-    // Persist to Cloud Firestore for cross-device sync
-    saveMeasurementToCloud(newEntry);
+    saveMeasurementToCloud(newEntry, effectiveUid);
 
-    // Reset inputs
     setFormWeight('');
     setFormWaist('');
-    setFormSteps('8000');
+    setFormSteps(userProfile?.dailyStepsTarget ? String(userProfile.dailyStepsTarget) : '8000');
     setFormNotes('');
-    showToast(`✓ Registro de ${formDate} guardado y sincronizado en Nube Firestore (${newEntry.weightKg} kg · ${newEntry.dailySteps} pasos).`);
+    showToast(
+      `✓ Registro de ${formDate} guardado y sincronizado en Nube Firestore (${newEntry.weightKg} kg · ${newEntry.dailySteps} pasos).`
+    );
   };
 
   const handleDeleteEntry = (id: string, date: string) => {
-    if (entries.length <= 1) {
-      showToast('No se puede eliminar el registro basal inicial.');
-      return;
-    }
     const updated = entries.filter((item) => item.id !== id);
     setEntries(updated);
     try {
-      localStorage.setItem('nutrivida_user_measurements', JSON.stringify(updated));
+      localStorage.setItem(storageKey, JSON.stringify(updated));
     } catch {
       // ignore
     }
 
-    deleteMeasurementFromCloud(id);
-    showToast(`Registro de ${date} eliminado de local y Nube Firestore.`);
+    deleteMeasurementFromCloud(id, effectiveUid);
+    showToast(`Registro de ${date} eliminado.`);
   };
 
   const handleResetToBaseline = () => {
-    setEntries(INITIAL_TRACKING_ENTRIES);
-    localStorage.setItem('nutrivida_user_measurements', JSON.stringify(INITIAL_TRACKING_ENTRIES));
-    showToast('Datos reiniciados a la medición inicial del 2026-11-01.');
+    localStorage.removeItem(storageKey);
+    if (!effectiveUid || effectiveUid === 'juan_fitstudio_user') {
+      localStorage.removeItem('nutrivida_user_measurements');
+    }
+    const reset = buildInitialEntriesForProfile();
+    setEntries(reset);
+    showToast('Mediciones restablecidas al punto inicial de tu perfil.');
   };
 
   // Export measurements to CSV
   const handleExportCSV = () => {
-    let csv = 'FECHA,PESO_KG,CINTURA_CM,NOTAS\n';
+    let csv = 'FECHA,PESO_KG,CINTURA_CM,PASOS,NOTAS\n';
     entries.forEach((e) => {
-      csv += `${e.date},${e.weightKg},${e.waistCircumferenceCm},"${e.notes.replace(/"/g, '""')}"\n`;
+      csv += `${e.date},${e.weightKg},${e.waistCircumferenceCm},${e.dailySteps || 0},"${e.notes.replace(/"/g, '""')}"\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `nutrivida_mediciones_juan_${new Date().toISOString().slice(0, 10)}.csv`;
+    const slug = (userProfile?.name || 'usuario').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    a.download = `nutrivida_mediciones_${slug}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('Archivo CSV descargado.');
   };
 
   // ==========================================
-  // DUAL-AXIS CHART COMPUTATION MATCHING SCREENSHOT
-  // Left Axis: Peso 96 to 108 kg (ticks: 96, 98, 100, 102, 104, 106, 108)
-  // Right Axis: Cintura 100 to 112 cm (ticks: 100, 102, 104, 106, 108, 110, 112)
+  // DYNAMIC DUAL-AXIS CHART COMPUTATION (adapts cleanly to any weight/waist)
   // ==========================================
-  const weightTicks = [108, 106, 104, 102, 100, 98, 96];
-  const waistTicks = [112, 110, 108, 106, 104, 102, 100];
+  const { weightTicks, waistTicks, minWeight, maxWeight, minWaist, maxWaist } = useMemo(() => {
+    const fallbackWeight = userProfile?.currentWeightKg && userProfile.currentWeightKg > 0 ? userProfile.currentWeightKg : 80;
+    const fallbackWaist = userProfile?.waistCm && userProfile.waistCm > 0 ? userProfile.waistCm : 90;
 
-  const minWeight = 96;
-  const maxWeight = 108;
-  const minWaist = 100;
-  const maxWaist = 112;
+    const weights = entries.length > 0 ? entries.map((e) => e.weightKg) : [fallbackWeight];
+    const waists = entries.length > 0 ? entries.map((e) => e.waistCircumferenceCm) : [fallbackWaist];
+
+    const centerW = Math.round((Math.min(...weights) + Math.max(...weights)) / 2 / 2) * 2;
+    const spanW = Math.max(6, Math.ceil((Math.max(...weights) - Math.min(...weights)) / 2) + 4);
+    const minW = Math.max(30, centerW - spanW);
+    const maxW = minW + 12;
+
+    const centerWaist = Math.round((Math.min(...waists) + Math.max(...waists)) / 2 / 2) * 2;
+    const spanWaist = Math.max(6, Math.ceil((Math.max(...waists) - Math.min(...waists)) / 2) + 4);
+    const minWa = Math.max(45, centerWaist - spanWaist);
+    const maxWa = minWa + 12;
+
+    const wTicks: number[] = [];
+    const waTicks: number[] = [];
+    for (let i = 0; i <= 6; i++) {
+      wTicks.push(maxW - i * 2);
+      waTicks.push(maxWa - i * 2);
+    }
+
+    return {
+      weightTicks: wTicks,
+      waistTicks: waTicks,
+      minWeight: minW,
+      maxWeight: maxW,
+      minWaist: minWa,
+      maxWaist: maxWa
+    };
+  }, [entries, userProfile]);
 
   // SVG dimensions
   const svgWidth = 600;
@@ -198,27 +272,25 @@ export const TrackingView: React.FC = () => {
   const chartInnerWidth = svgWidth - paddingLeft - paddingRight;
   const chartInnerHeight = svgHeight - paddingTop - paddingBottom;
 
-  // Coordinate mappers
   const getYForWeight = (w: number) => {
     const clamped = Math.max(minWeight, Math.min(maxWeight, w));
-    const ratio = (clamped - minWeight) / (maxWeight - minWeight);
+    const ratio = (clamped - minWeight) / Math.max(1, maxWeight - minWeight);
     return paddingTop + chartInnerHeight * (1 - ratio);
   };
 
   const getYForWaist = (w: number) => {
     const clamped = Math.max(minWaist, Math.min(maxWaist, w));
-    const ratio = (clamped - minWaist) / (maxWaist - minWaist);
+    const ratio = (clamped - minWaist) / Math.max(1, maxWaist - minWaist);
     return paddingTop + chartInnerHeight * (1 - ratio);
   };
 
   const getXForIndex = (index: number, total: number) => {
     if (total <= 1) {
-      return paddingLeft + chartInnerWidth * 0.12; // first position like in screenshot
+      return paddingLeft + chartInnerWidth * 0.12;
     }
     return paddingLeft + (chartInnerWidth / (total - 1)) * index;
   };
 
-  // Calculate points and polyline strings
   const chartData = useMemo(() => {
     const count = entries.length;
     const points = entries.map((entry, idx) => {
@@ -232,12 +304,21 @@ export const TrackingView: React.FC = () => {
     const waistPolyline = points.map((p) => `${p.x},${p.yWaist}`).join(' ');
 
     return { points, weightPolyline, waistPolyline };
-  }, [entries]);
+  }, [entries, minWeight, maxWeight, minWaist, maxWaist]);
 
   const initialEntry = entries[0];
   const latestEntry = entries[entries.length - 1];
-  const weightChange = Math.round((latestEntry.weightKg - initialEntry.weightKg) * 10) / 10;
-  const waistChange = Math.round((latestEntry.waistCircumferenceCm - initialEntry.waistCircumferenceCm) * 10) / 10;
+  const weightChange =
+    initialEntry && latestEntry
+      ? Math.round((latestEntry.weightKg - initialEntry.weightKg) * 10) / 10
+      : 0;
+  const waistChange =
+    initialEntry && latestEntry
+      ? Math.round((latestEntry.waistCircumferenceCm - initialEntry.waistCircumferenceCm) * 10) / 10
+      : 0;
+
+  const profileSexText = userProfile?.sex === 'female' ? 'Mujer' : 'Hombre';
+  const healthyWaistGoal = userProfile?.sex === 'female' ? '< 88 cm' : '< 95 cm';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -258,32 +339,35 @@ export const TrackingView: React.FC = () => {
                 Ficha Personal de Seguimiento
               </span>
               <span className="text-xs text-slate-300">
-                Juan · 53 años · 1,73 m · Basal 2026-11-01 (102 kg · 106 cm cintura)
+                {userProfile?.name ? `${userProfile.name} · ` : ''}
+                {profileSexText} · {userProfile?.age && userProfile.age > 0 ? `${userProfile.age} años` : '-- años'} ·{' '}
+                {userProfile?.heightCm && userProfile.heightCm > 0 ? `${(userProfile.heightCm / 100).toFixed(2)} m` : '-- m'}
+                {initialEntry ? ` · Basal ${initialEntry.date} (${initialEntry.weightKg} kg · ${initialEntry.waistCircumferenceCm} cm)` : ''}
               </span>
             </div>
             <h2 className="text-lg sm:text-xl font-extrabold text-white">
               Histórico Antropométrico & Registro de Perímetro Abdominal
             </h2>
             <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Monitoreo objetivo de la reducción de grasa corporal y visceral. La cinta métrica en el ombligo
-              es el mejor indicador de salud cardiovascular y metabólica junto con el déficit calórico.
+              Pesa 1×/semana (misma hora en ayunas) y mide cintura en el ombligo cada 2 semanas. Si en 2–3 semanas no hay bajada, reajusta ±100–150 kcal en tu ficha.
             </p>
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <button
               onClick={handleExportCSV}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+              disabled={entries.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
               title="Descargar mediciones en formato CSV"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Exportar CSV</span>
             </button>
-            {entries.length > 1 && (
+            {entries.length > 0 && (
               <button
                 onClick={handleResetToBaseline}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                title="Reiniciar a medición inicial del 2026-11-01"
+                title="Reiniciar al registro inicial del perfil"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>Restablecer</span>
@@ -296,38 +380,41 @@ export const TrackingView: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-4 mt-4 border-t border-slate-700/60 text-xs">
           <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-center">
             <span className="text-slate-400 text-[11px] block">Peso Basal</span>
-            <span className="font-extrabold text-white text-base">102.0 kg</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">2026-11-01</span>
+            <span className="font-extrabold text-white text-base">
+              {initialEntry ? `${initialEntry.weightKg.toFixed(1)} kg` : userProfile?.currentWeightKg ? `${userProfile.currentWeightKg} kg` : '--'}
+            </span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">{initialEntry?.date || 'Sin registro aún'}</span>
           </div>
           <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-center">
             <span className="text-slate-400 text-[11px] block">Cintura Basal</span>
-            <span className="font-extrabold text-teal-300 text-base">106.0 cm</span>
+            <span className="font-extrabold text-teal-300 text-base">
+              {initialEntry ? `${initialEntry.waistCircumferenceCm.toFixed(1)} cm` : userProfile?.waistCm ? `${userProfile.waistCm} cm` : '--'}
+            </span>
             <span className="text-[10px] text-slate-400 block mt-0.5">A nivel de ombligo</span>
           </div>
           <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-center">
             <span className="text-slate-400 text-[11px] block">Evolución Peso</span>
             <span className={`font-extrabold text-base ${weightChange <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {weightChange <= 0 ? `${weightChange} kg` : `+${weightChange} kg`}
+              {entries.length > 0 ? (weightChange <= 0 ? `${weightChange} kg` : `+${weightChange} kg`) : '--'}
             </span>
             <span className="text-[10px] text-slate-400 block mt-0.5">{entries.length} registro(s)</span>
           </div>
           <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 text-center">
             <span className="text-slate-400 text-[11px] block">Evolución Cintura</span>
             <span className={`font-extrabold text-base ${waistChange <= 0 ? 'text-teal-300' : 'text-amber-400'}`}>
-              {waistChange <= 0 ? `${waistChange} cm` : `+${waistChange} cm`}
+              {entries.length > 0 ? (waistChange <= 0 ? `${waistChange} cm` : `+${waistChange} cm`) : '--'}
             </span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">Meta: &lt; 95 cm</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">Meta ref: {healthyWaistGoal}</span>
           </div>
         </div>
       </section>
 
       {/* ======================================================== */}
-      {/* EXACT USER UI LAYOUT FROM /public/assets/aistudio/image_29bf512b.png */}
+      {/* LEFT FORM + RIGHT CHART & HISTORY TABLE */}
       {/* ======================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Añadir Nueva Medición (Width matching screenshot) */}
+        {/* LEFT COLUMN: Añadir Nueva Medición */}
         <div className="lg:col-span-4 bg-white rounded-2xl p-6 shadow-sm border border-slate-200/90">
-          {/* Header matching screenshot */}
           <div className="flex items-center gap-2 mb-6">
             <PlusCircle className="w-5 h-5 text-emerald-600 stroke-[2.5]" />
             <h3 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
@@ -362,7 +449,7 @@ export const TrackingView: React.FC = () => {
                 step="0.1"
                 value={formWeight}
                 onChange={(e) => setFormWeight(e.target.value)}
-                placeholder="Ej. 101.5"
+                placeholder={userProfile?.currentWeightKg ? `Ej. ${userProfile.currentWeightKg}` : 'Ej. 75.5'}
                 className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-teal-600 focus:border-transparent text-slate-800 bg-white"
                 required
               />
@@ -378,7 +465,7 @@ export const TrackingView: React.FC = () => {
                 step="0.5"
                 value={formWaist}
                 onChange={(e) => setFormWaist(e.target.value)}
-                placeholder="Ej. 104"
+                placeholder={userProfile?.waistCm ? `Ej. ${userProfile.waistCm}` : 'Ej. 88'}
                 className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-teal-600 focus:border-transparent text-slate-800 bg-white"
                 required
               />
@@ -626,8 +713,15 @@ export const TrackingView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {entries.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
+                {entries.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 px-3 text-center text-slate-400 text-xs">
+                      Aún no hay mediciones guardadas. Añade tu primer registro a la izquierda.
+                    </td>
+                  </tr>
+                ) : (
+                  entries.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
                     {/* Fecha */}
                     <td className="py-3.5 px-3 font-medium text-slate-900 whitespace-nowrap">
                       {entry.date}
@@ -664,7 +758,8 @@ export const TrackingView: React.FC = () => {
                       </button>
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>

@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Clock, Flame, Dumbbell, Sparkles, ChefHat, Check, Apple, Scale, HeartPulse } from 'lucide-react';
+import { X, Clock, Flame, Dumbbell, Sparkles, ChefHat, Check, Scale, ArrowLeftRight } from 'lucide-react';
 import { MealOption } from '../types/nutrition';
+import { getAlternativeMeals } from '../services/mealEngine';
 
 interface RecipeModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
   mealTypeLabel
 }) => {
   if (!isOpen || !meal) return null;
+
+  const altMeals = getAlternativeMeals(meal);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -79,39 +82,74 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
             <strong>Descripción del plato:</strong> {meal.description}
           </div>
 
-          {/* Ingredients with Escandallo en Crudo */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
-                <Scale className="w-4 h-4 text-emerald-600" />
-                Escandallo de Ingredientes (Ración en Crudo)
-              </h4>
-              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                Pesado en báscula
-              </span>
+          {/* Scaled Portions Banner */}
+          {meal.scaledNote && (
+            <div className="bg-teal-50 p-3 rounded-xl border border-teal-200 text-teal-950 text-xs flex items-start gap-2">
+              <Scale className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
+              <div>
+                <strong>Escalado personalizado activo:</strong> {meal.scaledNote}
+              </div>
             </div>
+          )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {meal.ingredients.map((ing, i) => (
-                <div
-                  key={i}
-                  className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70 flex flex-col justify-between"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-medium text-slate-800">{ing.name}</span>
-                    <span className="font-bold text-emerald-700 shrink-0">
-                      {ing.amount} {ing.unit}
+          {/* Direct "Si no te gusta" alternatives */}
+          {altMeals.length > 0 && (
+            <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 space-y-1.5">
+              <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                <ArrowLeftRight className="w-3.5 h-3.5 text-amber-700" />
+                Si no te gusta → Alternativas directas ({meal.alternatives?.join(', ')}):
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {altMeals.map((alt) => (
+                  <div
+                    key={alt.id}
+                    className="bg-white px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-[11px] flex items-center justify-between gap-2"
+                  >
+                    <span className="font-medium text-slate-800 truncate">
+                      <strong className="font-mono text-amber-900">{alt.id}</strong> · {alt.title}
                     </span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{alt.calories} kcal</span>
                   </div>
-                  {ing.rawStateNote && (
-                    <span className="text-[10px] text-amber-800 italic mt-0.5">
-                      • {ing.rawStateNote}
-                    </span>
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Ingredients with Escandallo en Crudo */}
+          {meal.ingredients.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-emerald-600" />
+                  Escandallo de Ingredientes (Ración en Crudo)
+                </h4>
+                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                  Pesado en báscula
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {meal.ingredients.map((ing, i) => (
+                  <div
+                    key={i}
+                    className="bg-slate-50 p-2.5 rounded-lg border border-slate-200/70 flex flex-col justify-between"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium text-slate-800">{ing.name}</span>
+                      <span className="font-bold text-emerald-700 shrink-0">
+                        {ing.amount} {ing.unit}
+                      </span>
+                    </div>
+                    {ing.rawStateNote && (
+                      <span className="text-[10px] text-amber-800 italic mt-0.5">
+                        • {ing.rawStateNote}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Step-by-Step Instructions */}
           <div>

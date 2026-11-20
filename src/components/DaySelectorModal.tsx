@@ -19,6 +19,8 @@ export const DaySelectorModal: React.FC<DaySelectorModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const headerTitle = weeklyPlan.label || `Semana ${weeklyPlan.weekNumber}`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -30,10 +32,10 @@ export const DaySelectorModal: React.FC<DaySelectorModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-base sm:text-lg">
-                🔄 Cambiar Día Específico (Semana {weeklyPlan.weekNumber})
+                🔄 Cambiar Día Específico ({headerTitle})
               </h3>
               <p className="text-xs text-slate-500">
-                Selecciona qué día de la semana deseas rotar con el algoritmo modular de 5 tomas
+                Selecciona qué día deseas rotar con las reglas de intercambio de 5 tomas
               </p>
             </div>
           </div>
@@ -53,22 +55,33 @@ export const DaySelectorModal: React.FC<DaySelectorModalProps> = ({
               className="p-3.5 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/20 bg-white transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
             >
               <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  {day.dayNumber && (
+                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-900 text-white">
+                      Día {day.dayNumber}
+                    </span>
+                  )}
                   <span className="font-extrabold text-sm text-slate-900">{day.dayName}</span>
-                  <span className="text-[11px] text-slate-700 font-bold flex items-center gap-1">
-                    <Flame className="w-3 h-3 text-amber-500" /> {day.totalCalories} kcal
-                  </span>
-                  <span className="text-[11px] text-emerald-700 flex items-center gap-1 font-semibold">
-                    <Dumbbell className="w-3 h-3 text-emerald-600" /> {day.totalProtein}g P
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    ({day.totalFruitPieces} frutas)
-                  </span>
+                  {day.lunch.id === 'LIBRE' ? (
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
+                      Comida Libre Domingo
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-[11px] text-slate-700 font-bold flex items-center gap-1">
+                        <Flame className="w-3 h-3 text-amber-500" /> {day.totalCalories} kcal
+                      </span>
+                      <span className="text-[11px] text-emerald-700 flex items-center gap-1 font-semibold">
+                        <Dumbbell className="w-3 h-3 text-emerald-600" /> {day.totalProtein}g P
+                      </span>
+                    </>
+                  )}
+                  <span className="text-[10px] text-slate-500">({day.totalFruitPieces} frutas)</span>
                 </div>
                 <div className="text-xs text-slate-600 truncate">
-                  <span className="text-amber-800 font-medium">D: {day.breakfast.title}</span> ·{' '}
-                  <span className="text-emerald-800 font-bold">C: {day.lunch.title}</span> ·{' '}
-                  <span className="text-indigo-800 font-medium">N: {day.dinner.title}</span>
+                  <span className="text-amber-800 font-medium">D: {day.breakfast.id}</span> ·{' '}
+                  <span className="text-emerald-800 font-bold">C: {day.lunch.id}</span> ·{' '}
+                  <span className="text-indigo-800 font-medium">N: {day.dinner.id}</span>
                 </div>
               </div>
 

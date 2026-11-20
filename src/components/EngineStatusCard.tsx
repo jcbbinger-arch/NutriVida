@@ -4,11 +4,17 @@ import { RuleValidationReport } from '../types/nutrition';
 
 interface EngineStatusCardProps {
   report: RuleValidationReport;
-  activeWeekNumber: 1 | 2;
+  activeWeekNumber: 1 | 2 | 3 | 4 | 5;
+  weekLabel?: string;
 }
 
-export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, activeWeekNumber }) => {
+export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({
+  report,
+  activeWeekNumber,
+  weekLabel
+}) => {
   const [showLogs, setShowLogs] = useState(false);
+  const blockTitle = weekLabel || (activeWeekNumber === 5 ? 'Días 29–30 (Cierre)' : `Semana ${activeWeekNumber}`);
 
   return (
     <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-2xl p-4 sm:p-5">
@@ -21,15 +27,22 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm font-bold text-slate-900">
-                Auditoría Clínica & Culinaria de la Semana {activeWeekNumber}
+                Auditoría Clínica & Reglas de Intercambio · {blockTitle}
               </h3>
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full text-white ${
+                  report.isValid ? 'bg-emerald-600' : 'bg-amber-600'
+                }`}
+              >
                 <Check className="w-3 h-3" />
-                8/8 MEJORAS VERIFICADAS
+                {report.isValid ? 'PLAN 30D VALIDADO' : 'REVISAR REGLAS'}
               </span>
             </div>
             <p className="text-xs text-slate-600 mt-0.5">
-              Escandallo en crudo aplicado, 5 tomas planificadas, fibra aumentada (&gt;30g/día) y balance semanal estricto.
+              Días de menú completo: <strong>{report.averageCaloriesPerDay} kcal/día</strong> ·{' '}
+              <strong>{report.averageProteinPerDay} g proteína/día</strong> ·{' '}
+              <strong>{report.averageFiberPerDay} g fibra/día</strong> ·{' '}
+              <strong>0 colisiones de pescado comida/cena</strong>.
             </p>
           </div>
         </div>
@@ -38,7 +51,7 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
           onClick={() => setShowLogs(!showLogs)}
           className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 hover:text-emerald-950 transition-colors self-start sm:self-auto cursor-pointer"
         >
-          <span>{showLogs ? 'Ocultar diagnósticos' : 'Ver verificación de las 8 mejoras'}</span>
+          <span>{showLogs ? 'Ocultar diagnósticos' : 'Ver detalle de auditoría'}</span>
           {showLogs ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </div>
@@ -50,8 +63,8 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
             <Scale className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold text-slate-800">Escandallo Crudo</div>
-            <div className="text-[10px] text-slate-500">Gramajes exactos</div>
+            <div className="text-[11px] font-bold text-slate-800">~{report.averageCaloriesPerDay} kcal/día</div>
+            <div className="text-[10px] text-slate-500">Obj. 1.700–1.800</div>
           </div>
         </div>
 
@@ -60,8 +73,8 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
             <Fish className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold text-slate-800">{report.oilyFishCountPerWeek}x Pescado Azul</div>
-            <div className="text-[10px] text-slate-500">Omega-3 EPA/DHA</div>
+            <div className="text-[11px] font-bold text-slate-800">{report.oilyFishCountPerWeek}× Pescado Azul</div>
+            <div className="text-[10px] text-slate-500">Meta 2–3×/sem</div>
           </div>
         </div>
 
@@ -70,8 +83,8 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
             <Wheat className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold text-slate-800">{report.legumeCountPerWeek}x Legumbres</div>
-            <div className="text-[10px] text-slate-500">Almidón resistente</div>
+            <div className="text-[11px] font-bold text-slate-800">{report.legumeCountPerWeek}× Legumbres</div>
+            <div className="text-[10px] text-slate-500">{report.averageFiberPerDay}g fibra/día</div>
           </div>
         </div>
 
@@ -81,7 +94,7 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
           </div>
           <div className="min-w-0">
             <div className="text-[11px] font-bold text-slate-800">{report.fruitPiecesPerDayAverage} Frutas/Día</div>
-            <div className="text-[10px] text-slate-500">Pectina & potasio</div>
+            <div className="text-[10px] text-slate-500">2–3 piezas enteras</div>
           </div>
         </div>
 
@@ -90,8 +103,8 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
             <Check className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold text-slate-800">5 Tomas Diarias</div>
-            <div className="text-[10px] text-slate-500">Desayuno & merienda</div>
+            <div className="text-[11px] font-bold text-slate-800">{report.averageProteinPerDay}g Prot/Día</div>
+            <div className="text-[10px] text-slate-500">Meta 110–125 g</div>
           </div>
         </div>
 
@@ -101,7 +114,7 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
           </div>
           <div className="min-w-0">
             <div className="text-[11px] font-bold text-slate-800">0% Alcohol</div>
-            <div className="text-[10px] text-slate-500">Caldo casero con limón</div>
+            <div className="text-[10px] text-slate-500">Domingo 1× LIBRE</div>
           </div>
         </div>
       </div>
@@ -111,7 +124,7 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
         <div className="mt-3.5 pt-3 border-t border-emerald-200/80 bg-white/90 rounded-xl p-3.5 space-y-2 text-xs">
           <div className="flex items-center gap-1.5 font-bold text-slate-800">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>Detalle de las 8 mejoras implementadas según la valoración de Juan:</span>
+            <span>Verificación matemática, clínica y culinaria ({blockTitle}):</span>
           </div>
           <ul className="space-y-1 text-slate-700 pl-1">
             {report.details.map((detail, idx) => (
@@ -124,7 +137,7 @@ export const EngineStatusCard: React.FC<EngineStatusCardProps> = ({ report, acti
           <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100 flex items-center gap-1">
             <Zap className="w-3.5 h-3.5 text-amber-500" />
             <span>
-              Huevos moderados a ~1 entero al día (aprox. {report.eggsCountPerWeek} a la semana sumando claras pasteurizadas). Atún limitado a {report.cannedTunaCountPerWeek} latas para evitar sobreexposición a metales pesados.
+              Huevos enteros: ~{report.eggsCountPerWeek}/bloque (claras donde 1 clara ≈ 30 ml). Atún al natural: {report.cannedTunaCountPerWeek} toma(s).
             </span>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChefHat, Clock, Flame, Sparkles, CheckCircle2, Apple, Scale, WineOff, Heart } from 'lucide-react';
+import { ChefHat, Sparkles, CheckCircle2, Apple, Scale, WineOff, Heart } from 'lucide-react';
 import { getWeeklyPreparationGuide } from '../services/mealEngine';
 
 export const QuickInstructions: React.FC = () => {
@@ -14,17 +14,17 @@ export const QuickInstructions: React.FC = () => {
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-bold text-slate-900">
-              Instrucciones Rápidas de Elaboración (Estrategia Culinaria en 3 Pasos)
+              Guía de Cocina Segura, Batch Doble y Progresión Clínica
             </h3>
             <p className="text-xs text-slate-500">
-              Mejoras desde la cocina: batch cooking de almidón resistente, sofrito base sin alcohol y aceite pesado.
+              Batch cooking en 2 tandas (domingo y miércoles), enfriado &lt;2h a ≤4 °C y reglas de ajuste sin bajar proteína.
             </p>
           </div>
         </div>
 
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
           <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-          Batch Cooking del Domingo
+          Batch Domingo & Miércoles
         </span>
       </div>
 
@@ -50,43 +50,51 @@ export const QuickInstructions: React.FC = () => {
 
             <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Garantiza control glucémico y adherencia</span>
+              <span>Control glucémico y seguridad alimentaria</span>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Culinary Kitchen Hacks Grid from Juan's Review */}
+      {/* Culinary Kitchen Hacks & Food Safety Grid */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
         <div className="bg-emerald-50/50 p-2.5 rounded-xl border border-emerald-100 flex items-start gap-2">
           <Scale className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-emerald-950 block">Aceite Pesado (10-15 ml):</strong>
-            <span className="text-slate-600">Pesar el AOVE en báscula o cuchara sopera evita meter 200 kcal invisibles por comida.</span>
+            <strong className="text-emerald-950 block">Escandallo Crudo & AOVE:</strong>
+            <span className="text-slate-600">
+              Pesar en crudo limpio y medir el AOVE evita kcal ocultas. En pescadería pide filetes limpios sin espinas.
+            </span>
           </div>
         </div>
 
         <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-100 flex items-start gap-2">
           <Apple className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-amber-950 block">Fruta Entera con Piel:</strong>
-            <span className="text-slate-600">Manzana, pera y kiwi aportan pectina y vitamina C. Nunca en zumo para evitar picos de fructosa.</span>
+            <strong className="text-amber-950 block">Horarios & Tomas (3–4 h):</strong>
+            <span className="text-slate-600">
+              Si te saltas una toma no la compenses con otra: sigue con la siguiente. Sin dulce a las 11:00 ni galletas de noche.
+            </span>
           </div>
         </div>
 
         <div className="bg-purple-50/50 p-2.5 rounded-xl border border-purple-100 flex items-start gap-2">
           <WineOff className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-purple-950 block">Sabor Sin Alcohol:</strong>
-            <span className="text-slate-600">Sustituir vino por caldo casero de verduras desgrasado con unas gotas de limón o vinagre de manzana.</span>
+            <strong className="text-purple-950 block">Recipientes Poco Profundos:</strong>
+            <span className="text-slate-600">
+              Enfriar arroz, legumbres y patatas en &lt;2 h a ≤4 °C; máx. 3 días en nevera (Bacillus cereus) y congelar resto.
+            </span>
           </div>
         </div>
 
         <div className="bg-blue-50/50 p-2.5 rounded-xl border border-blue-100 flex items-start gap-2">
           <Heart className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-blue-950 block">Flexibilidad Semanal:</strong>
-            <span className="text-slate-600">1 comida libre planificada a la semana mejora la adherencia psicológica más que la prohibición total.</span>
+            <strong className="text-blue-950 block">Ajuste de Meseta (2–3 sem):</strong>
+            <span className="text-slate-600">
+              Si en 2–3 semanas el peso no baja, retira el pan de media mañana y cena antes de bajar proteína. Nunca &lt;1.500 kcal.
+            </span>
           </div>
         </div>
       </div>

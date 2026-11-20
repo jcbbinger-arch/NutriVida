@@ -3,6 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import {
   getFirestore,
   doc,
+  getDoc,
   getDocFromServer,
   collection,
   onSnapshot,
@@ -13,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { TrackingEntry } from '../types/training';
+import { UserProfile } from '../types/nutrition';
 import { OutdoorRouteSession, EllipticalSession, StrengthSetLog } from '../components/FitStudioEngineView';
 
 // Initialize Firebase App
@@ -70,8 +72,62 @@ export async function testFirebaseConnection(): Promise<boolean> {
     await getDocFromServer(doc(db, '_connection_test', 'status'));
     return true;
   } catch (error) {
-    console.log('Firebase connection status checked.');
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Firebase client appears offline:', error.message);
+    }
+    return false;
+  }
+}
+
+// ================================================
+// USER PROFILE PERSISTENCE (5-STEP ONBOARDING & UPDATES)
+// ================================================
+export async function loadUserProfileFromCloud(userId?: string): Promise<UserProfile | null> {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}`;
+  try {
+    const docRef = doc(db, 'users', targetUid);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as UserProfile;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+export async function saveUserProfileToCloud(
+  profile: UserProfile,
+  userId?: string
+): Promise<boolean> {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}`;
+  try {
+    const docRef = doc(db, 'users', targetUid);
+    const sanitized = JSON.parse(
+      JSON.stringify({
+        ...profile,
+        uid: targetUid,
+        updatedAt: new Date().toISOString()
+      })
+    );
+    await setDoc(docRef, sanitized, { merge: true });
     return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
+  }
+}
+
+export async function deleteUserProfileFromCloud(userId?: string): Promise<void> {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}`;
+  try {
+    await deleteDoc(doc(db, 'users', targetUid));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

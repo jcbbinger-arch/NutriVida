@@ -19,23 +19,28 @@ import { calculateGroceryList } from '../services/mealEngine';
 
 interface ShoppingListSectionProps {
   currentWeekPlan: WeeklyPlan;
-  otherWeekPlan?: WeeklyPlan;
-  activeWeekNumber: 1 | 2;
+  allWeeks?: WeeklyPlan[];
+  activeWeekNumber: 1 | 2 | 3 | 4 | 5;
 }
 
 export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
   currentWeekPlan,
-  otherWeekPlan,
+  allWeeks,
   activeWeekNumber
 }) => {
-  const [listScope, setListScope] = useState<'current_week' | 'fortnight'>('current_week');
+  const [listScope, setListScope] = useState<'current_week' | 'fortnight' | 'full_month'>('current_week');
 
   const activePlans = useMemo(() => {
-    if (listScope === 'fortnight' && otherWeekPlan) {
-      return [currentWeekPlan, otherWeekPlan];
+    if (listScope === 'full_month' && allWeeks && allWeeks.length > 0) {
+      return allWeeks;
+    }
+    if (listScope === 'fortnight' && allWeeks && allWeeks.length >= 2) {
+      return activeWeekNumber >= 3 ? allWeeks.slice(2, 4) : allWeeks.slice(0, 2);
     }
     return [currentWeekPlan];
-  }, [listScope, currentWeekPlan, otherWeekPlan]);
+  }, [listScope, currentWeekPlan, allWeeks, activeWeekNumber]);
+
+  const scopeKey = `${listScope}_${currentWeekPlan.id}`;
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
     try {
@@ -50,12 +55,10 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('all');
   const [copied, setCopied] = useState(false);
 
-  // Compute calculated dynamic list from selected scope
   const groupedGrocery = useMemo(() => {
     return calculateGroceryList(activePlans);
   }, [activePlans]);
 
-  // Flatten all items for counters and search
   const allItems = useMemo(() => {
     const list = [];
     for (const [category, items] of Object.entries(groupedGrocery)) {
@@ -79,7 +82,7 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
         next.add(id);
       }
       try {
-        localStorage.setItem(`nutrivida_checked_${currentWeekPlan.id}`, JSON.stringify(Array.from(next)));
+        localStorage.setItem(`nutrivida_checked_${scopeKey}`, JSON.stringify(Array.from(next)));
       } catch {
         // ignore storage errors
       }
@@ -89,7 +92,11 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
 
   const resetChecked = () => {
     setCheckedIds(new Set());
-    localStorage.removeItem(`nutrivida_checked_${currentWeekPlan.id}`);
+    try {
+      localStorage.removeItem(`nutrivida_checked_${scopeKey}`);
+    } catch {
+      // ignore
+    }
   };
 
   const getCategoryIcon = (cat: string) => {
@@ -111,10 +118,20 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
     }
   };
 
-  // Copy structured list to clipboard
+  const scopeTitle =
+    listScope === 'full_month'
+      ? 'MES COMPLETO (30 DÍAS)'
+      : listScope === 'fortnight'
+      ? activeWeekNumber >= 3
+        ? 'QUINCENA 2 (S3–S4)'
+        : 'QUINCENA 1 (S1–S2)'
+      : activeWeekNumber === 5
+      ? 'CIERRE DEL MES (DÍAS 29–30)'
+      : `SEMANA ${activeWeekNumber}`;
+
   const handleCopyClipboard = () => {
-    let text = `🛒 LISTA DE LA COMPRA NUTRIVIDA (${listScope === 'fortnight' ? 'PLAN QUINCENAL (2 SEMANAS)' : `SEMANA ${activeWeekNumber}`})\n`;
-    text += `Generada: ${currentWeekPlan.generatedAt}\n`;
+    let text = `🛒 LISTA DE LA COMPRA NUTRIVIDA (${scopeTitle})\n`;
+    text += `Plan 30 Días Intercambiable · Pesos netos en crudo\n`;
     text += `=========================================\n\n`;
 
     (Object.keys(groupedGrocery) as GroceryCategory[]).forEach((cat) => {
@@ -129,7 +146,9 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
       }
     });
 
-    navigator.clipboard.writeText(text);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -153,17 +172,17 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-bold text-slate-900">
-              Lista de la Compra Dinámica con Escandallo
+              Lista de la Compra Dinámica Normalizada ({scopeTitle})
             </h3>
             <p className="text-xs text-slate-500">
-              Cantidades exactas en crudo y piezas de fruta entera requeridas para los platos sorteados.
+              Ingredientes unificados en peso neto limpio en crudo (comidas LIBRE del domingo y café/infusiones excluidos).
             </p>
           </div>
         </div>
 
         {/* Scope Selector & Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
-          {otherWeekPlan && (
+          {allWeeks && allWeeks.length > 1 && (
             <div className="bg-slate-100 p-0.5 rounded-lg flex items-center text-xs">
               <button
                 onClick={() => setListScope('current_week')}
@@ -171,7 +190,7 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
                   listScope === 'current_week' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Semana {activeWeekNumber}
+                {activeWeekNumber === 5 ? 'D29-30' : `Semana ${activeWeekNumber}`}
               </button>
               <button
                 onClick={() => setListScope('fortnight')}
@@ -179,7 +198,15 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
                   listScope === 'fortnight' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Quincena Completa (2 Sem.)
+                Quincena
+              </button>
+              <button
+                onClick={() => setListScope('full_month')}
+                className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                  listScope === 'full_month' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mes Completo (30D)
               </button>
             </div>
           )}
@@ -233,7 +260,6 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
 
       {/* Search & Category Filter Pills */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mb-6">
-        {/* Search */}
         <div className="relative flex-1 max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -245,7 +271,6 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
           />
         </div>
 
-        {/* Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
           <button
             onClick={() => setActiveCategoryFilter('all')}
@@ -290,22 +315,16 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
                 className="bg-slate-50/60 rounded-xl p-4 border border-slate-200/80 flex flex-col justify-between"
               >
                 <div>
-                  {/* Category Header */}
                   <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-200">
                     <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-white shadow-2xs">
-                        {getCategoryIcon(cat)}
-                      </div>
-                      <h4 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">
-                        {cat}
-                      </h4>
+                      <div className="p-1.5 rounded-lg bg-white shadow-2xs">{getCategoryIcon(cat)}</div>
+                      <h4 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">{cat}</h4>
                     </div>
                     <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                       {items.length} items
                     </span>
                   </div>
 
-                  {/* Items List */}
                   <ul className="space-y-2">
                     {items.map((item) => {
                       const isChecked = checkedIds.has(item.id);
@@ -341,9 +360,7 @@ export const ShoppingListSection: React.FC<ShoppingListSectionProps> = ({
                               </span>
                             </div>
                             {item.rawStateNote && (
-                              <div className="text-[10px] text-amber-800/80 italic mt-0.5">
-                                • {item.rawStateNote}
-                              </div>
+                              <div className="text-[10px] text-amber-800/80 italic mt-0.5">• {item.rawStateNote}</div>
                             )}
                             <div className="text-[10px] text-slate-400 mt-0.5 truncate">
                               Días: {item.usedInDays.join(', ')}

@@ -5,7 +5,6 @@ import {
   User,
   Printer,
   Share2,
-  ShieldCheck,
   CalendarRange,
   Utensils,
   Activity,
@@ -20,8 +19,8 @@ import { User as FirebaseUser } from 'firebase/auth';
 interface HeaderProps {
   userProfile: UserProfile;
   validationReport: RuleValidationReport;
-  activeWeek: 1 | 2;
-  onChangeWeek: (week: 1 | 2) => void;
+  activeWeek: 1 | 2 | 3 | 4 | 5;
+  onChangeWeek: (week: 1 | 2 | 3 | 4 | 5) => void;
   activeTab: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics';
   onChangeTab: (tab: 'home' | 'fitstudio' | 'tracking' | 'nutrition' | 'training' | 'infographics') => void;
   onOpenProfile: () => void;
@@ -31,9 +30,16 @@ interface HeaderProps {
   onShare: () => void;
 }
 
+const WEEK_OPTIONS: Array<{ value: 1 | 2 | 3 | 4 | 5; label: string; title: string }> = [
+  { value: 1, label: 'S1', title: 'Semana 1 (Días 1–7)' },
+  { value: 2, label: 'S2', title: 'Semana 2 (Días 8–14)' },
+  { value: 3, label: 'S3', title: 'Semana 3 (Días 15–21)' },
+  { value: 4, label: 'S4', title: 'Semana 4 (Días 22–28)' },
+  { value: 5, label: 'D29-30', title: 'Cierre del Mes (Días 29–30)' }
+];
+
 export const Header: React.FC<HeaderProps> = ({
   userProfile,
-  validationReport,
   activeWeek,
   onChangeWeek,
   activeTab,
@@ -55,17 +61,17 @@ export const Header: React.FC<HeaderProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
                   Nutri<span className="text-emerald-600">Vida</span>
                 </h1>
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  Nutrición & Entrenamiento 2 Semanas
+                  Plan 30 Días Intercambiable & Entreno
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 font-medium hidden sm:block">
-                5 Tomas · Escandallo en Crudo · Caminata Desnivel (+238m/-238m) · Fuerza Excéntrica
+                5 Tomas · ~{userProfile.targetCalories || 1750} kcal · {userProfile.targetProteinMin}–{userProfile.targetProteinMax}g P · Factor ×{(userProfile.scaleFactor || 1).toFixed(2)} · Pescado Azul & Legumbres
               </p>
             </div>
           </div>
@@ -90,40 +96,44 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{currentUser ? currentUser.displayName?.split(' ')[0] || 'Mi Cuenta' : 'Iniciar Sesión'}</span>
             </button>
 
-            {/* Week 1 / Week 2 selector */}
+            {/* 30-Day Week Selector (S1..S4 + D29-30) */}
             <div className="bg-slate-100 p-0.5 rounded-xl flex items-center border border-slate-200/80 text-xs">
-              <button
-                onClick={() => onChangeWeek(1)}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeWeek === 1
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <CalendarRange className="w-3 h-3" />
-                <span>Semana 1</span>
-              </button>
-              <button
-                onClick={() => onChangeWeek(2)}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  activeWeek === 2
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <CalendarRange className="w-3 h-3" />
-                <span>Semana 2</span>
-              </button>
+              <CalendarRange className="w-3 h-3 text-emerald-600 mx-1.5 hidden sm:inline shrink-0" />
+              {WEEK_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => onChangeWeek(opt.value)}
+                  title={opt.title}
+                  className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    activeWeek === opt.value
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
             <button
               onClick={onOpenProfile}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-              title="Ver ficha clínica del usuario y ajustes de escandallo"
+              title="Ver ficha clínica del usuario y ajustes de escalado (5 pasos)"
             >
               <User className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden lg:inline">{userProfile.name}</span>
-              <span className="text-slate-500">53a · 102kg</span>
+              <span className="hidden lg:inline">
+                {userProfile.onboardingCompleted && userProfile.name ? userProfile.name : 'Mi Perfil'}
+              </span>
+              <span className="text-slate-500">
+                {userProfile.onboardingCompleted && userProfile.age > 0
+                  ? `${userProfile.age}a · ${userProfile.currentWeightKg}kg`
+                  : 'Configurar perfil'}
+              </span>
+              {Math.abs((userProfile.scaleFactor || 1) - 1) > 0.04 && (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                  ×{(userProfile.scaleFactor || 1).toFixed(2)}
+                </span>
+              )}
             </button>
 
             <div className="flex items-center gap-1">
@@ -192,7 +202,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Utensils className="w-3.5 h-3.5 text-emerald-400" />
-            <span>2. Plan Nutricional 2 Semanas (5 Tomas)</span>
+            <span>2. Plan Nutricional 30 Días (5 Tomas)</span>
           </button>
 
           <button

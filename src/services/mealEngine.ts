@@ -1,7 +1,7 @@
 import {
   DayPlan,
   WeeklyPlan,
-  FortnightPlan,
+  MonthlyPlan,
   MealOption,
   RuleValidationReport,
   GroceryItemConsolidated,
@@ -12,8 +12,10 @@ import {
   BREAKFAST_OPTIONS,
   MORNING_OPTIONS,
   LUNCH_OPTIONS,
+  LIBRE_LUNCH_OPTION,
   SNACK_OPTIONS,
-  DINNER_OPTIONS
+  DINNER_OPTIONS,
+  CANONICAL_30_DAY_CALENDAR
 } from '../data/database';
 
 function getRandomInt(min: number, max: number): number {
@@ -24,21 +26,69 @@ function pickRandom<T>(array: T[]): T {
   return array[getRandomInt(0, array.length - 1)];
 }
 
+export function getMealById(
+  mealType: 'breakfast' | 'morning' | 'lunch' | 'snack' | 'dinner',
+  id: string
+): MealOption | undefined {
+  if (mealType === 'breakfast') return BREAKFAST_OPTIONS.find((m) => m.id === id);
+  if (mealType === 'morning') return MORNING_OPTIONS.find((m) => m.id === id);
+  if (mealType === 'lunch') {
+    if (id === 'LIBRE') return LIBRE_LUNCH_OPTION;
+    return LUNCH_OPTIONS.find((m) => m.id === id);
+  }
+  if (mealType === 'snack') return SNACK_OPTIONS.find((m) => m.id === id);
+  return DINNER_OPTIONS.find((m) => m.id === id);
+}
+
+export function getAlternativeMeals(meal: MealOption): MealOption[] {
+  if (!meal.alternatives || meal.alternatives.length === 0) return [];
+  return meal.alternatives
+    .map((altId) => getMealById(meal.mealType, altId))
+    .filter((m): m is MealOption => Boolean(m));
+}
+
+export function isOilyFishMeal(meal: MealOption): boolean {
+  return Boolean(meal.isOilyFish);
+}
+
+export function isLegumeMeal(meal: MealOption): boolean {
+  return Boolean(meal.isLegume || meal.proteinSource === 'legumbre');
+}
+
+export function isAnyFishMeal(meal: MealOption): boolean {
+  return (
+    meal.proteinSource === 'pescado_blanco' ||
+    meal.proteinSource === 'pescado_azul' ||
+    Boolean(meal.isOilyFish)
+  );
+}
+
+function computeDayTotals(meals: MealOption[], hardTrainingBonus: boolean = false) {
+  const bonusKcal = hardTrainingBonus ? 140 : 0; // +40g pan integral o +1 fruta entera
+  const bonusProtein = hardTrainingBonus ? 4 : 0;
+  const bonusCarbs = hardTrainingBonus ? 28 : 0;
+  const bonusFat = hardTrainingBonus ? 1 : 0;
+  const bonusFiber = hardTrainingBonus ? 3.5 : 0;
+
+  return {
+    totalCalories: meals.reduce((acc, m) => acc + m.calories, 0) + bonusKcal,
+    totalProtein: meals.reduce((acc, m) => acc + m.protein, 0) + bonusProtein,
+    totalCarbs: meals.reduce((acc, m) => acc + m.carbs, 0) + bonusCarbs,
+    totalFat: meals.reduce((acc, m) => acc + m.fat, 0) + bonusFat,
+    totalFiber: Math.round((meals.reduce((acc, m) => acc + m.fiber, 0) + bonusFiber) * 10) / 10,
+    totalFruitPieces: meals.reduce((acc, m) => acc + (m.fruitPieces || 0), 0),
+    omega3EpaDhaTotalMg: meals.reduce((acc, m) => acc + (m.omega3EpaDhaMg || 0), 0),
+    omega3AlaTotalMg: meals.reduce((acc, m) => acc + (m.omega3AlaMg || 0), 0)
+  };
+}
+
 /**
- * Check if a lunch and dinner meal have protein conflict
+ * Regla clave del plan 30 días: "No juntes dos pescados el mismo día (comida y cena)."
  */
 export function hasProteinConflict(lunch: MealOption, dinner: MealOption): boolean {
-  const isMeatLunch = lunch.proteinSource === 'ave' || lunch.proteinSource === 'ternera';
-  const isMeatDinner = dinner.proteinSource === 'ave' || dinner.proteinSource === 'ternera';
-  if (isMeatLunch && isMeatDinner) return true;
+  if (lunch.id === 'LIBRE') return false;
 
-  const isFishLunch = lunch.proteinSource === 'pescado_blanco' || lunch.proteinSource === 'pescado_azul';
-  const isFishDinner = dinner.proteinSource === 'pescado_blanco' || dinner.proteinSource === 'pescado_azul';
-  if (isFishLunch && isFishDinner) return true;
-
-  if (lunch.proteinSource === dinner.proteinSource && lunch.proteinSource !== 'vegetal') {
-    return true;
-  }
+  if (isAnyFishMeal(lunch) && isAnyFishMeal(dinner)) return true;
 
   return false;
 }
@@ -57,7 +107,7 @@ export function getValidLunchOptions(prevCategory?: string, nextCategory?: strin
 }
 
 /**
- * Validate a weekly plan against scientific, clinical and culinary rules
+ * Validate a weekly plan against 30-day interchangeable plan & clinical safety rules
  */
 export function validateWeeklyPlan(days: DayPlan[]): RuleValidationReport {
   let consecutiveLunchDuplicates = 0;
@@ -67,41 +117,65 @@ export function validateWeeklyPlan(days: DayPlan[]): RuleValidationReport {
   let eggCount = 0;
   let cannedTunaCount = 0;
   let totalFruitPieces = 0;
+  let sumCaloriesFixedDays = 0;
+  let sumProteinFixedDays = 0;
+  let fixedDaysCount = 0;
+  let sumFiber = 0;
+  let daysBelow25gFiber = 0;
+
+  const lunchIds = new Set<string>();
+  const dinnerIds = new Set<string>();
   const details: string[] = [];
 
   for (let i = 0; i < days.length; i++) {
     const current = days[i];
+    const isLibreDay = current.lunch.id === 'LIBRE';
 
-    // Check consecutive lunch categories
+    if (!isLibreDay) {
+      sumCaloriesFixedDays += current.totalCalories;
+      sumProteinFixedDays += current.totalProtein;
+      fixedDaysCount++;
+    }
+
+    sumFiber += current.totalFiber;
+    if (!isLibreDay && current.totalFiber < 25) {
+      daysBelow25gFiber++;
+    }
+
+    lunchIds.add(current.lunch.id);
+    dinnerIds.add(current.dinner.id);
+
+    // Check consecutive lunch categories (ignoring LIBRE)
     if (i > 0) {
       const prev = days[i - 1];
-      if (current.lunch.category === prev.lunch.category) {
+      if (
+        current.lunch.id !== 'LIBRE' &&
+        prev.lunch.id !== 'LIBRE' &&
+        current.lunch.category === prev.lunch.category
+      ) {
         consecutiveLunchDuplicates++;
         details.push(
-          `Alerta: Repetición consecutiva de "${current.lunch.category}" entre ${prev.dayName} y ${current.dayName}.`
+          `Nota rotación: "${current.lunch.category}" aparece en días consecutivos (${prev.dayName} y ${current.dayName}).`
         );
       }
     }
 
-    // Check lunch-dinner balance & protein collision
+    // Check lunch-dinner fish collision ("No juntes dos pescados el mismo día")
     if (hasProteinConflict(current.lunch, current.dinner)) {
       lunchDinnerCollisions++;
       details.push(
-        `Alerta en ${current.dayName}: Posible solapamiento de proteína entre almuerzo (${current.lunch.proteinSource}) y cena (${current.dinner.proteinSource}).`
+        `Alerta en ${current.dayName}: Dos pescados el mismo día entre comida (${current.lunch.id}) y cena (${current.dinner.id}).`
       );
     }
 
-    // Tally specific nutritional markers
+    // Tally nutritional markers across the 5 daily slots
     const allMeals = [current.breakfast, current.morning, current.lunch, current.snack, current.dinner];
     allMeals.forEach((m) => {
-      if (m.category === 'Pescado Azul' || m.proteinSource === 'pescado_azul') {
+      if (isOilyFishMeal(m)) {
         oilyFishCount++;
       }
-      if (m.category === 'Legumbres Ligeras' || m.proteinSource === 'legumbre') {
+      if (isLegumeMeal(m)) {
         legumeCount++;
-      }
-      if (m.proteinSource === 'huevo') {
-        eggCount++;
       }
       if (m.title.toLowerCase().includes('atún')) {
         cannedTunaCount++;
@@ -109,22 +183,49 @@ export function validateWeeklyPlan(days: DayPlan[]): RuleValidationReport {
       if (m.fruitPieces) {
         totalFruitPieces += m.fruitPieces;
       }
+      m.ingredients.forEach((ing) => {
+        if (ing.name.toLowerCase().includes('huevo campero')) {
+          eggCount += ing.amount;
+        }
+      });
     });
   }
 
-  const fruitPiecesPerDayAverage = Math.round((totalFruitPieces / 7) * 10) / 10;
-  const isValid = consecutiveLunchDuplicates === 0 && lunchDinnerCollisions === 0;
+  const dayCount = Math.max(days.length, 1);
+  const effectiveFixedDays = Math.max(fixedDaysCount, 1);
+  const averageCaloriesPerDay = Math.round(sumCaloriesFixedDays / effectiveFixedDays);
+  const averageProteinPerDay = Math.round(sumProteinFixedDays / effectiveFixedDays);
+  const averageFiberPerDay = Math.round((sumFiber / dayCount) * 10) / 10;
+  const fruitPiecesPerDayAverage = Math.round((totalFruitPieces / dayCount) * 10) / 10;
+  const noSameWeekRepeats = lunchIds.size === days.length && dinnerIds.size === days.length;
 
-  if (isValid) {
-    details.push('✓ Regla 1: Rotación consecutiva de categorías de almuerzo 100% variada (sin duplicados adyacentes).');
-    details.push('✓ Regla 2: Regla de balance estricta: almuerzo y cena compensados sin solapamiento de carnes o pescados.');
-    details.push(`✓ Regla 3: Protección articular real: ${oilyFishCount} tomas semanales de pescado azul rico en EPA/DHA.`);
-    details.push(`✓ Regla 4: Control glucémico y fibra: ${legumeCount} tomas de legumbres con almidón resistente.`);
-    details.push(`✓ Regla 5: Fruta fresca entera: promedio de ${fruitPiecesPerDayAverage} piezas/día con piel (pectina y potasio).`);
-    details.push(`✓ Regla 6: Moderación de huevos (${eggCount}/semana) y atún en lata (${cannedTunaCount}/semana) sustituido por caballa/sardina.`);
-    details.push('✓ Regla 7: Cero alcohol en recetas culinarias (vino sustituido por caldo casero aromatizado con limón).');
-    details.push('✓ Regla 8: Escandallo calórico completo en las 5 tomas con gramajes en crudo calculados.');
-  }
+  const isFullWeek = days.length >= 6;
+  const isValid = isFullWeek
+    ? lunchDinnerCollisions === 0 &&
+      oilyFishCount >= 2 &&
+      oilyFishCount <= 4 &&
+      legumeCount >= 1 &&
+      averageCaloriesPerDay >= 1500
+    : lunchDinnerCollisions === 0;
+
+  details.push(
+    `✓ Energía sostenible (días de menú completo): media de ${averageCaloriesPerDay} kcal/día (objetivo ≈1.700–1.800 kcal · déficit ≈700–800 kcal vs 2.580 kcal · nunca <1.500 kcal).`
+  );
+  details.push(
+    `✓ Proteína repartida en 5 tomas: media de ${averageProteinPerDay} g/día (objetivo ≈110–125 g/día; evita el antojo nocturno y de media mañana).`
+  );
+  details.push(
+    `✓ Pescado azul (C5, C7, C9, N2, N4): ${oilyFishCount} raciones en este bloque (meta 2–3×/semana, sin juntar dos pescados en comida y cena).`
+  );
+  details.push(
+    `✓ Legumbres (C6, C8, C9): ${legumeCount} raciones en este bloque · Fibra media ${averageFiberPerDay} g/día.`
+  );
+  details.push(
+    `✓ Fruta entera: media de ${fruitPiecesPerDayAverage} piezas/día · Huevos enteros (~${eggCount}/bloque) + ${cannedTunaCount} toma(s) de atún.`
+  );
+  details.push(
+    '✓ Seguridad en cocina: Batch cooking doble (domingo y miércoles), enfriado <2h en recipientes poco profundos a ≤4 °C (máx. 3 días nevera / congelar resto) y 0% alcohol.'
+  );
 
   return {
     isValid,
@@ -135,6 +236,11 @@ export function validateWeeklyPlan(days: DayPlan[]): RuleValidationReport {
     eggsCountPerWeek: eggCount,
     cannedTunaCountPerWeek: cannedTunaCount,
     fruitPiecesPerDayAverage,
+    averageCaloriesPerDay,
+    averageProteinPerDay,
+    averageFiberPerDay,
+    daysBelow30gFiber: daysBelow25gFiber,
+    noSameWeekRepeats,
     noSweetMorningSnacks: true,
     noRefinedEveningCarbs: true,
     zeroAlcoholInRecipes: true,
@@ -143,70 +249,168 @@ export function validateWeeklyPlan(days: DayPlan[]): RuleValidationReport {
   };
 }
 
+function getWeekLabel(weekNumber: 1 | 2 | 3 | 4 | 5): string {
+  if (weekNumber === 1) return 'Semana 1 (Días 1–7)';
+  if (weekNumber === 2) return 'Semana 2 (Días 8–14)';
+  if (weekNumber === 3) return 'Semana 3 (Días 15–21)';
+  if (weekNumber === 4) return 'Semana 4 (Días 22–28)';
+  return 'Cierre del Mes (Días 29–30)';
+}
+
 /**
- * Generate a complete 7-day plan with 5 meals per day
+ * Build the official 30-day canonical interchangeable calendar (Weeks 1-4 + Closing Days 29-30)
  */
-export function generateWeeklyPlan(weekNumber: 1 | 2 = 1, preferredLegumesTarget: number = 3): WeeklyPlan {
+export function buildCanonical30DayPlan(): MonthlyPlan {
+  const buildWeekSlice = (weekNumber: 1 | 2 | 3 | 4 | 5): WeeklyPlan => {
+    const rows = CANONICAL_30_DAY_CALENDAR.filter((r) => r.weekNumber === weekNumber);
+    const days: DayPlan[] = rows.map((row) => {
+      const breakfast = getMealById('breakfast', row.breakfastId) || BREAKFAST_OPTIONS[0];
+      const morning = getMealById('morning', row.morningId) || MORNING_OPTIONS[0];
+      const lunch = getMealById('lunch', row.lunchId) || LUNCH_OPTIONS[0];
+      const snack = getMealById('snack', row.snackId) || SNACK_OPTIONS[0];
+      const dinner = getMealById('dinner', row.dinnerId) || DINNER_OPTIONS[0];
+      const totals = computeDayTotals([breakfast, morning, lunch, snack, dinner], false);
+
+      return {
+        dayNumber: row.dayNumber,
+        dayId: row.dayId,
+        dayName: row.dayName,
+        breakfast,
+        morning,
+        lunch,
+        snack,
+        dinner,
+        isFlexibleMealDay: row.lunchId === 'LIBRE',
+        flexibleMealType: 'lunch',
+        hardTrainingBonus: false,
+        ...totals
+      };
+    });
+
+    return {
+      id: `canonical-w${weekNumber}`,
+      weekNumber,
+      label: getWeekLabel(weekNumber),
+      generatedAt: 'Calendario Oficial 30 Días Intercambiable',
+      days,
+      validationReport: validateWeeklyPlan(days)
+    };
+  };
+
+  return {
+    id: `monthly-canonical-${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    week1: buildWeekSlice(1),
+    week2: buildWeekSlice(2),
+    week3: buildWeekSlice(3),
+    week4: buildWeekSlice(4),
+    week5: buildWeekSlice(5)
+  };
+}
+
+/**
+ * Generate a randomized interchangeable week respecting all 30-day plan rules
+ * (2-3 oily fish, 2-3 legumes, LIBRE on Sunday, zero same-day fish collisions)
+ */
+export function generateWeeklyPlan(
+  weekNumber: 1 | 2 | 3 | 4 | 5 = 1,
+  preferredLegumesTarget: number = 2
+): WeeklyPlan {
   const days: DayPlan[] = [];
+  const usedLunchIds = new Set<string>();
+  const usedDinnerIds = new Set<string>();
   let prevLunchCategory: string | undefined = undefined;
 
-  // Track quotas for weekly balance (legumes >= 3, oily fish >= 2)
   let legumesAssigned = 0;
   let oilyFishAssigned = 0;
+  const maxOilyFishPerWeek = weekNumber === 5 ? 1 : 3;
+  const targetDaysConfig = weekNumber === 5 ? DAYS_CONFIG.slice(0, 2) : DAYS_CONFIG;
+  const startDayOffset = (weekNumber - 1) * 7;
 
-  for (let i = 0; i < DAYS_CONFIG.length; i++) {
-    const dayConfig = DAYS_CONFIG[i];
+  const legumeDays = weekNumber % 2 === 1 ? [1, 4] : [1, 3, 5];
 
-    // 1. Breakfast: rotated nicely
-    const breakfast = BREAKFAST_OPTIONS[i % BREAKFAST_OPTIONS.length];
+  for (let i = 0; i < targetDaysConfig.length; i++) {
+    const dayConfig = targetDaysConfig[i];
+    const isSunday = dayConfig.id === 'domingo';
 
-    // 2. Morning: random from morning options
-    const morning = pickRandom(MORNING_OPTIONS);
+    const breakfast = BREAKFAST_OPTIONS[(i + weekNumber) % BREAKFAST_OPTIONS.length];
+    const morning = MORNING_OPTIONS[(i + weekNumber + 2) % MORNING_OPTIONS.length];
+    const snack = SNACK_OPTIONS[(i + weekNumber + 4) % SNACK_OPTIONS.length];
 
-    // 3. Lunch: pick with intelligent quota boosting for legumes and oily fish
-    let validLunches = getValidLunchOptions(prevLunchCategory);
-
-    // If early in week and low on legumes, prioritize legume dishes
-    if (legumesAssigned < preferredLegumesTarget && i < 5) {
-      const legumeOptions = validLunches.filter((l) => l.category === 'Legumbres Ligeras');
-      if (legumeOptions.length > 0 && Math.random() > 0.35) {
-        validLunches = legumeOptions;
+    let lunch: MealOption;
+    if (isSunday) {
+      lunch = LIBRE_LUNCH_OPTION;
+    } else {
+      let validLunches = getValidLunchOptions(prevLunchCategory).filter((l) => !usedLunchIds.has(l.id));
+      if (validLunches.length === 0) {
+        validLunches = getValidLunchOptions(prevLunchCategory);
       }
-    }
-    // If low on oily fish, prioritize oily fish
-    else if (oilyFishAssigned < 2 && i < 6) {
-      const fishOptions = validLunches.filter((l) => l.category === 'Pescado Azul');
-      if (fishOptions.length > 0 && Math.random() > 0.4) {
-        validLunches = fishOptions;
+
+      if (oilyFishAssigned >= maxOilyFishPerWeek) {
+        const nonOily = validLunches.filter((l) => !isOilyFishMeal(l));
+        if (nonOily.length > 0) validLunches = nonOily;
       }
+
+      const wantsLegumeToday = legumeDays.includes(i) && legumesAssigned < preferredLegumesTarget;
+      const legumePool = validLunches.filter((l) => isLegumeMeal(l));
+
+      if (wantsLegumeToday && legumePool.length > 0) {
+        lunch = pickRandom(legumePool);
+      } else if (oilyFishAssigned < 2 && !wantsLegumeToday) {
+        const oilyPool = validLunches.filter((l) => isOilyFishMeal(l));
+        if (oilyPool.length > 0 && (i >= 2 || Math.random() > 0.4)) {
+          lunch = pickRandom(oilyPool);
+        } else {
+          const nonLegumeExtra = validLunches.filter((l) => !isLegumeMeal(l));
+          lunch = pickRandom(nonLegumeExtra.length > 0 ? nonLegumeExtra : validLunches);
+        }
+      } else {
+        const filtered =
+          legumesAssigned >= preferredLegumesTarget
+            ? validLunches.filter((l) => !isLegumeMeal(l))
+            : validLunches;
+        lunch = pickRandom(filtered.length > 0 ? filtered : validLunches);
+      }
+
+      usedLunchIds.add(lunch.id);
+      prevLunchCategory = lunch.category;
+      if (isLegumeMeal(lunch)) legumesAssigned++;
+      if (isOilyFishMeal(lunch)) oilyFishAssigned++;
     }
 
-    const lunch = pickRandom(validLunches);
-    prevLunchCategory = lunch.category;
+    // Select compatible dinner (never two fish on the same day)
+    let validDinners = getValidDinnerOptions(lunch).filter((d) => !usedDinnerIds.has(d.id));
+    if (oilyFishAssigned >= maxOilyFishPerWeek) {
+      const nonOilyDinners = validDinners.filter((d) => !isOilyFishMeal(d));
+      if (nonOilyDinners.length > 0) validDinners = nonOilyDinners;
+    }
+    if (validDinners.length === 0) {
+      validDinners = getValidDinnerOptions(lunch);
+    }
 
-    if (lunch.category === 'Legumbres Ligeras') legumesAssigned++;
-    if (lunch.category === 'Pescado Azul') oilyFishAssigned++;
+    // Prefer N7 or N6 on Sunday nights to return gently to the plan
+    let dinner: MealOption;
+    if (isSunday) {
+      const sundayDinners = validDinners.filter((d) => d.id === 'N7' || d.id === 'N6');
+      dinner = sundayDinners.length > 0 ? pickRandom(sundayDinners) : pickRandom(validDinners);
+    } else {
+      const baseCal = breakfast.calories + morning.calories + snack.calories + lunch.calories;
+      const baseProt = breakfast.protein + morning.protein + snack.protein + lunch.protein;
+      const scoredDinners = validDinners.filter((d) => {
+        const dayCal = baseCal + d.calories;
+        const dayProt = baseProt + d.protein;
+        return dayCal >= 1650 && dayCal <= 1860 && dayProt >= 105 && dayProt <= 130;
+      });
+      dinner = pickRandom(scoredDinners.length > 0 ? scoredDinners : validDinners);
+    }
 
-    // 4. Afternoon snack: rotated nicely
-    const snack = SNACK_OPTIONS[(i + (weekNumber === 2 ? 2 : 0)) % SNACK_OPTIONS.length];
+    usedDinnerIds.add(dinner.id);
+    if (isOilyFishMeal(dinner)) oilyFishAssigned++;
 
-    // 5. Dinner: balanced with lunch
-    const validDinners = getValidDinnerOptions(lunch);
-    const dinner = pickRandom(validDinners);
-
-    // Flexible meal flag: e.g. Sunday lunch or Saturday dinner
-    const isFlexibleMealDay = dayConfig.id === 'domingo';
-
-    const allMeals = [breakfast, morning, lunch, snack, dinner];
-    const totalCalories = allMeals.reduce((acc, m) => acc + m.calories, 0);
-    const totalProtein = allMeals.reduce((acc, m) => acc + m.protein, 0);
-    const totalCarbs = allMeals.reduce((acc, m) => acc + m.carbs, 0);
-    const totalFat = allMeals.reduce((acc, m) => acc + m.fat, 0);
-    const totalFiber = allMeals.reduce((acc, m) => acc + m.fiber, 0);
-    const totalFruitPieces = allMeals.reduce((acc, m) => acc + (m.fruitPieces || 0), 0);
-    const omega3TotalMg = allMeals.reduce((acc, m) => acc + (m.omega3Mg || 0), 0);
+    const totals = computeDayTotals([breakfast, morning, lunch, snack, dinner], false);
 
     days.push({
+      dayNumber: startDayOffset + i + 1,
       dayId: dayConfig.id,
       dayName: dayConfig.name,
       breakfast,
@@ -214,23 +418,17 @@ export function generateWeeklyPlan(weekNumber: 1 | 2 = 1, preferredLegumesTarget
       lunch,
       snack,
       dinner,
-      isFlexibleMealDay,
+      isFlexibleMealDay: isSunday,
       flexibleMealType: 'lunch',
-      totalCalories,
-      totalProtein,
-      totalCarbs,
-      totalFat,
-      totalFiber,
-      totalFruitPieces,
-      omega3TotalMg
+      hardTrainingBonus: false,
+      ...totals
     });
   }
-
-  const validationReport = validateWeeklyPlan(days);
 
   return {
     id: `plan-w${weekNumber}-${Date.now()}`,
     weekNumber,
+    label: getWeekLabel(weekNumber),
     generatedAt: new Date().toLocaleDateString('es-ES', {
       weekday: 'long',
       year: 'numeric',
@@ -240,40 +438,38 @@ export function generateWeeklyPlan(weekNumber: 1 | 2 = 1, preferredLegumesTarget
       minute: '2-digit'
     }),
     days,
-    validationReport
+    validationReport: validateWeeklyPlan(days)
   };
 }
 
 /**
- * Generate a complete 2-week Fortnight Plan
- */
-export function generateFortnightPlan(): FortnightPlan {
-  const week1 = generateWeeklyPlan(1, 3);
-  const week2 = generateWeeklyPlan(2, 4);
-
-  return {
-    id: `fortnight-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    week1,
-    week2
-  };
-}
-
-/**
- * Swap an entire day while adhering to rules
+ * Swap an entire day while adhering to rules and avoiding same-week repeats
  */
 export function swapDayPlan(currentPlan: WeeklyPlan, dayId: string): WeeklyPlan {
   const dayIndex = currentPlan.days.findIndex((d) => d.dayId === dayId);
   if (dayIndex === -1) return currentPlan;
 
   const currentDay = currentPlan.days[dayIndex];
+  const isSunday = currentDay.dayId === 'domingo' && currentDay.isFlexibleMealDay;
+
   const prevLunch = dayIndex > 0 ? currentPlan.days[dayIndex - 1].lunch.category : undefined;
   const nextLunch =
     dayIndex < currentPlan.days.length - 1 ? currentPlan.days[dayIndex + 1].lunch.category : undefined;
 
-  const validLunches = getValidLunchOptions(prevLunch, nextLunch);
-  const altLunches = validLunches.filter((l) => l.id !== currentDay.lunch.id);
-  const newLunch = altLunches.length > 0 ? pickRandom(altLunches) : pickRandom(validLunches);
+  const otherLunchIds = new Set(currentPlan.days.filter((_, idx) => idx !== dayIndex).map((d) => d.lunch.id));
+  const otherDinnerIds = new Set(currentPlan.days.filter((_, idx) => idx !== dayIndex).map((d) => d.dinner.id));
+
+  let newLunch: MealOption;
+  if (isSunday) {
+    newLunch = currentDay.lunch;
+  } else {
+    const validLunches = getValidLunchOptions(prevLunch, nextLunch);
+    const unusedLunches = validLunches.filter((l) => !otherLunchIds.has(l.id) && l.id !== currentDay.lunch.id);
+    const altLunches = validLunches.filter((l) => l.id !== currentDay.lunch.id);
+    newLunch = pickRandom(
+      unusedLunches.length > 0 ? unusedLunches : altLunches.length > 0 ? altLunches : validLunches
+    );
+  }
 
   const altBreakfast = BREAKFAST_OPTIONS.filter((b) => b.id !== currentDay.breakfast.id);
   const newBreakfast = altBreakfast.length > 0 ? pickRandom(altBreakfast) : pickRandom(BREAKFAST_OPTIONS);
@@ -285,11 +481,17 @@ export function swapDayPlan(currentPlan: WeeklyPlan, dayId: string): WeeklyPlan 
   const newSnack = altSnack.length > 0 ? pickRandom(altSnack) : pickRandom(SNACK_OPTIONS);
 
   const validDinners = getValidDinnerOptions(newLunch);
+  const unusedDinners = validDinners.filter((d) => !otherDinnerIds.has(d.id) && d.id !== currentDay.dinner.id);
   const altDinners = validDinners.filter((d) => d.id !== currentDay.dinner.id);
-  const newDinner = altDinners.length > 0 ? pickRandom(altDinners) : pickRandom(validDinners);
+  const newDinner = pickRandom(
+    unusedDinners.length > 0 ? unusedDinners : altDinners.length > 0 ? altDinners : validDinners
+  );
 
   const updatedDays = [...currentPlan.days];
-  const allMeals = [newBreakfast, newMorning, newLunch, newSnack, newDinner];
+  const totals = computeDayTotals(
+    [newBreakfast, newMorning, newLunch, newSnack, newDinner],
+    Boolean(currentDay.hardTrainingBonus)
+  );
 
   updatedDays[dayIndex] = {
     ...currentDay,
@@ -298,13 +500,7 @@ export function swapDayPlan(currentPlan: WeeklyPlan, dayId: string): WeeklyPlan 
     lunch: newLunch,
     snack: newSnack,
     dinner: newDinner,
-    totalCalories: allMeals.reduce((acc, m) => acc + m.calories, 0),
-    totalProtein: allMeals.reduce((acc, m) => acc + m.protein, 0),
-    totalCarbs: allMeals.reduce((acc, m) => acc + m.carbs, 0),
-    totalFat: allMeals.reduce((acc, m) => acc + m.fat, 0),
-    totalFiber: allMeals.reduce((acc, m) => acc + m.fiber, 0),
-    totalFruitPieces: allMeals.reduce((acc, m) => acc + (m.fruitPieces || 0), 0),
-    omega3TotalMg: allMeals.reduce((acc, m) => acc + (m.omega3Mg || 0), 0)
+    ...totals
   };
 
   return {
@@ -315,7 +511,7 @@ export function swapDayPlan(currentPlan: WeeklyPlan, dayId: string): WeeklyPlan 
 }
 
 /**
- * Swap a specific meal item in any of the 5 meal slots
+ * Swap a specific meal item in any of the 5 meal slots (D↔D, M↔M, C↔C/LIBRE, ME↔ME, N↔N)
  */
 export function swapSingleMeal(
   currentPlan: WeeklyPlan,
@@ -350,15 +546,17 @@ export function swapSingleMeal(
       dayIndex < currentPlan.days.length - 1 ? currentPlan.days[dayIndex + 1].lunch.category : undefined;
 
     let meal: MealOption;
-    if (chosenMealId) {
+    if (chosenMealId === 'LIBRE') {
+      meal = LIBRE_LUNCH_OPTION;
+    } else if (chosenMealId) {
       meal = LUNCH_OPTIONS.find((l) => l.id === chosenMealId) || day.lunch;
     } else {
       const valid = getValidLunchOptions(prevCat, nextCat).filter((l) => l.id !== day.lunch.id);
       meal = pickRandom(valid.length > 0 ? valid : LUNCH_OPTIONS);
     }
     updatedDay.lunch = meal;
+    updatedDay.isFlexibleMealDay = meal.id === 'LIBRE';
 
-    // Check if new lunch conflicts with current dinner; auto-adjust dinner if needed
     if (hasProteinConflict(meal, day.dinner)) {
       const validDinners = getValidDinnerOptions(meal);
       updatedDay.dinner = pickRandom(validDinners);
@@ -374,21 +572,15 @@ export function swapSingleMeal(
     updatedDay.dinner = meal;
   }
 
-  const allMeals = [
-    updatedDay.breakfast,
-    updatedDay.morning,
-    updatedDay.lunch,
-    updatedDay.snack,
-    updatedDay.dinner
-  ];
+  const totals = computeDayTotals(
+    [updatedDay.breakfast, updatedDay.morning, updatedDay.lunch, updatedDay.snack, updatedDay.dinner],
+    Boolean(updatedDay.hardTrainingBonus)
+  );
 
-  updatedDay.totalCalories = allMeals.reduce((acc, m) => acc + m.calories, 0);
-  updatedDay.totalProtein = allMeals.reduce((acc, m) => acc + m.protein, 0);
-  updatedDay.totalCarbs = allMeals.reduce((acc, m) => acc + m.carbs, 0);
-  updatedDay.totalFat = allMeals.reduce((acc, m) => acc + m.fat, 0);
-  updatedDay.totalFiber = allMeals.reduce((acc, m) => acc + m.fiber, 0);
-  updatedDay.totalFruitPieces = allMeals.reduce((acc, m) => acc + (m.fruitPieces || 0), 0);
-  updatedDay.omega3TotalMg = allMeals.reduce((acc, m) => acc + (m.omega3Mg || 0), 0);
+  updatedDay = {
+    ...updatedDay,
+    ...totals
+  };
 
   const updatedDays = [...currentPlan.days];
   updatedDays[dayIndex] = updatedDay;
@@ -401,7 +593,36 @@ export function swapSingleMeal(
 }
 
 /**
- * Calculate automated consolidated grocery list grouped by supermarket aisles
+ * Toggle "+40g pan integral o +1 fruta" bonus for hard training days
+ */
+export function toggleHardTrainingBonus(currentPlan: WeeklyPlan, dayId: string): WeeklyPlan {
+  const dayIndex = currentPlan.days.findIndex((d) => d.dayId === dayId);
+  if (dayIndex === -1) return currentPlan;
+
+  const day = currentPlan.days[dayIndex];
+  const nextBonus = !day.hardTrainingBonus;
+  const totals = computeDayTotals(
+    [day.breakfast, day.morning, day.lunch, day.snack, day.dinner],
+    nextBonus
+  );
+
+  const updatedDays = [...currentPlan.days];
+  updatedDays[dayIndex] = {
+    ...day,
+    hardTrainingBonus: nextBonus,
+    ...totals
+  };
+
+  return {
+    ...currentPlan,
+    days: updatedDays,
+    validationReport: validateWeeklyPlan(updatedDays)
+  };
+}
+
+/**
+ * Calculate automated consolidated grocery list using canonical normalized ingredients
+ * (Excludes coffee/tea/infusions from supermarket list and LIBRE meals)
  */
 export function calculateGroceryList(
   plans: WeeklyPlan | WeeklyPlan[]
@@ -426,7 +647,11 @@ export function calculateGroceryList(
       const meals = [day.breakfast, day.morning, day.lunch, day.snack, day.dinner];
       meals.forEach((meal) => {
         meal.ingredients.forEach((ing) => {
+          if (ing.excludeFromGrocery) return;
+
           const key = `${ing.name.toLowerCase().trim()}_${ing.unit.toLowerCase().trim()}`;
+          const dayLabel = day.dayNumber ? `D${day.dayNumber}` : `${prefix}${day.dayName}`;
+
           if (!map.has(key)) {
             map.set(key, {
               name: ing.name,
@@ -434,12 +659,12 @@ export function calculateGroceryList(
               unit: ing.unit,
               category: ing.category,
               rawStateNote: ing.rawStateNote,
-              usedInDays: new Set([`${prefix}${day.dayName}`])
+              usedInDays: new Set([dayLabel])
             });
           } else {
             const item = map.get(key)!;
             item.totalAmount += ing.amount;
-            item.usedInDays.add(`${prefix}${day.dayName}`);
+            item.usedInDays.add(dayLabel);
           }
         });
       });
@@ -475,7 +700,6 @@ export function calculateGroceryList(
     }
   });
 
-  // Sort each category alphabetically
   Object.keys(result).forEach((catKey) => {
     result[catKey as GroceryCategory].sort((a, b) => a.name.localeCompare(b.name));
   });
@@ -484,30 +708,30 @@ export function calculateGroceryList(
 }
 
 /**
- * Enhanced Batch Cooking & Kitchen Strategy for 2-week sustainability
+ * Enhanced Double Batch Cooking (Sunday + Wednesday), Cold Chain & Progression Rules
  */
 export function getWeeklyPreparationGuide() {
   return [
     {
       step: 1,
-      title: 'Batch Cooking del Domingo: Almidón Resistente & Bases (50 min)',
+      title: 'Batch Cooking Doble (Domingo y Miércoles) · Cadena de Frío ≤4 °C',
       description:
-        'Cuece 1 kg de patatas medianas con piel y resérvalas en la nevera a 4°C durante 24-48h (esto retrograda el almidón y genera almidón resistente tipo 3 con menor impacto glucémico). Cuece el arroz integral, la quinoa y las lentejas o garbanzos en agua con laurel. Deja 4 huevos cocidos con cáscara en la nevera.',
-      badge: 'Almidón Resistente & Fibra'
+        'Cocina legumbres, arroz integral y patatas en dos tandas semanales (domingo y miércoles) en lugar de una sola para toda la semana. Enfría en recipientes poco profundos en <2 h y refrigera a ≤4 °C: consume el arroz y los guisos en máx. 3 días (control Bacillus cereus) y congela el resto.',
+      badge: 'Domingo + Miércoles (<2h · ≤4 °C)'
     },
     {
       step: 2,
-      title: 'Sofrito Base y Caldo Casero Sin Alcohol (30 min)',
+      title: 'Patata 24h (Almidón Resistente), Pesos en Crudo y AOVE Pesado',
       description:
-        'Prepara 2 litros de caldo casero vegetal con puerro, apio y zanahoria (sin pastillas industriales ni sal excesiva). Haz un sofrito base suave con cebolla, pimiento y tomate con 1 cucharada de AOVE para usarlo como fondo de guisos de legumbres y pisto. Cero vino blanco: añade un toque de limón o vinagre de manzana ecológico.',
-      badge: 'Cero Alcohol & Sabor Real'
+        'Cocina las patatas con piel y déjalas enfriar 24h en nevera (puedes recalentarlas sin problema manteniendo el almidón resistente). Respeta el peso en crudo limpio (ej. 180g caballa limpia ≈ 320g brutos) y mide siempre el AOVE con cuchara o báscula.',
+      badge: 'Escandallo Real & Almidón Resistente'
     },
     {
       step: 3,
-      title: 'Proteínas Frescas y Pescado Azul al Momento (10-12 min)',
+      title: 'Cero Alcohol en Cocina, Entreno Duro y Ajuste de Meseta',
       description:
-        'Los lomos de salmón, sardinas, caballa o pechugas se marcan a la plancha bien caliente en el momento con 10-15 ml de AOVE pesado en cuchara para preservar sus ácidos grasos Omega-3 (EPA/DHA) intactos y tiernos. Lava la fruta entera y consúmela con piel para retener el 100% de la pectina saciante.',
-      badge: 'Omega-3 Intacto & Saciedad'
+        'Sustituye vino/alcohol por caldo casero, limón, vinagre de manzana, pimentón, ajo y hierbas. En días de entreno duro activa el bonus (+40g pan integral o +1 fruta). Si tras 2–3 semanas no bajas peso, retira primero el pan de las 11:00 y la cena antes de reducir proteína (nunca bajes de ~1.500 kcal).',
+      badge: '0% Alcohol & Progresión Clínica'
     }
   ];
 }

@@ -82,7 +82,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
               className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm border border-slate-700 transition-all cursor-pointer flex items-center justify-center gap-2"
             >
               <Utensils className="w-4 h-4 text-emerald-400" />
-              <span>Ver Plan Nutricional 2 Semanas</span>
+              <span>Ver Plan Nutricional 30 Días</span>
             </button>
 
             {!currentUser && (
@@ -178,19 +178,19 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                  Módulo 3 · Nutrición 2 Semanas
+                  Módulo 3 · Plan 30 Días
                 </span>
                 <h3 className="font-extrabold text-base text-slate-900 group-hover:text-slate-800 transition-colors">
-                  Plan Nutricional Modular
+                  Plan 30 Días Intercambiable
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  5 tomas diarias programadas, balance de macronutrientes (135-155g proteicos), escandallo en crudo, rotación de platos y lista de compra automática.
+                  39 platos en 5 tomas diarias, ≈1.700–1.800 kcal/día, 110–125g de proteína, 2–3× pescado azul y legumbres, domingo LIBRE y lista de compra mensual.
                 </p>
               </div>
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-900">
-              <span>Ver Menú Semanal</span>
+              <span>Ver Calendario 30 Días</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>

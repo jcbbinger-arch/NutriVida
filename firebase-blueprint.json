@@ -2,19 +2,34 @@
   "entities": {
     "user_profile": {
       "title": "UserProfile",
-      "description": "Perfil clínico y metabólico del usuario",
+      "description": "Perfil clínico, metabólico (Mifflin-St Jeor) y de escalado de raciones del usuario",
       "type": "object",
       "properties": {
         "uid": { "type": "string" },
         "name": { "type": "string" },
+        "sex": { "type": "string", "enum": ["male", "female"] },
         "age": { "type": "number" },
-        "weightKg": { "type": "number" },
+        "currentWeightKg": { "type": "number" },
+        "targetWeightKg": { "type": "number" },
         "heightCm": { "type": "number" },
-        "waistCircumferenceCm": { "type": "number" },
+        "waistCm": { "type": "number" },
+        "activityFactor": { "type": "number" },
+        "goalType": { "type": "string", "enum": ["lose", "maintain", "gain"] },
+        "deficitPercent": { "type": "number" },
+        "bmr": { "type": "number" },
+        "tdee": { "type": "number" },
         "targetCalories": { "type": "number" },
+        "targetProteinMin": { "type": "number" },
+        "targetProteinMax": { "type": "number" },
+        "targetFatGrams": { "type": "number" },
+        "targetCarbsGrams": { "type": "number" },
+        "targetFiberDailyG": { "type": "number" },
+        "targetWaterMl": { "type": "number" },
+        "scaleFactor": { "type": "number" },
+        "onboardingCompleted": { "type": "boolean" },
         "updatedAt": { "type": "string" }
       },
-      "required": ["uid", "name", "age", "weightKg", "heightCm"]
+      "required": ["uid", "name", "age", "currentWeightKg", "heightCm"]
     },
     "tracking_entry": {
       "title": "TrackingEntry",
