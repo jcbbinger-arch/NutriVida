@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { TrackingEntry } from '../types/training';
-import { OutdoorRouteSession, EllipticalSession } from '../components/FitStudioEngineView';
+import { OutdoorRouteSession, EllipticalSession, StrengthSetLog } from '../components/FitStudioEngineView';
 
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -174,6 +174,20 @@ export async function saveOutdoorRouteToCloud(
   }
 }
 
+export async function deleteOutdoorRouteFromCloud(
+  routeId: string,
+  userId?: string
+) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/outdoor_routes/${routeId}`;
+  try {
+    const docRef = doc(db, 'users', targetUid, 'outdoor_routes', routeId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 // ================================================
 // REAL-TIME SYNC: ELLIPTICAL SESSIONS
 // ================================================
@@ -213,6 +227,76 @@ export async function saveEllipticalSessionToCloud(
     await setDoc(docRef, session, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteEllipticalSessionFromCloud(
+  sessionId: string,
+  userId?: string
+) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/elliptical_sessions/${sessionId}`;
+  try {
+    const docRef = doc(db, 'users', targetUid, 'elliptical_sessions', sessionId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// ================================================
+// REAL-TIME SYNC: STRENGTH SESSIONS
+// ================================================
+export function subscribeStrengthSessions(
+  userId?: string,
+  callback?: (sessions: StrengthSetLog[]) => void
+) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/strength_sessions`;
+  const colRef = collection(db, 'users', targetUid, 'strength_sessions');
+
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const items: StrengthSetLog[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push(docSnap.data() as StrengthSetLog);
+      });
+      if (callback) {
+        callback(items);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function saveStrengthSessionToCloud(
+  session: StrengthSetLog,
+  userId?: string
+) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/strength_sessions/${session.id}`;
+  try {
+    const docRef = doc(db, 'users', targetUid, 'strength_sessions', session.id);
+    await setDoc(docRef, session, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteStrengthSessionFromCloud(
+  sessionId: string,
+  userId?: string
+) {
+  const targetUid = userId || getEffectiveUserId();
+  const path = `users/${targetUid}/strength_sessions/${sessionId}`;
+  try {
+    const docRef = doc(db, 'users', targetUid, 'strength_sessions', sessionId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

@@ -33,6 +33,10 @@ service cloud.firestore {
       match /elliptical_sessions/{sessionId} {
         allow read, write: if isGuestOrOwner(userId);
       }
+
+      match /strength_sessions/{sessionId} {
+        allow read, write: if isGuestOrOwner(userId);
+      }
     }
   }
 }

@@ -39,6 +39,8 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "fecha": { "type": "string", "description": "Fecha de la sesión en formato YYYY-MM-DD" },
+        "nombre_ruta": { "type": "string", "description": "Nombre o etiqueta opcional de la ruta" },
         "tipo": { "type": "string", "enum": ["Caminata", "Bicicleta"] },
         "distancia_km": { "type": "number" },
         "tiempo_minutos": { "type": "number" },
@@ -62,6 +64,7 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "fecha": { "type": "string", "description": "Fecha de la sesión en formato YYYY-MM-DD" },
         "tiempo_minutos": { "type": "number" },
         "tiempo_formato": { "type": "string" },
         "nivel_resistencia": { "type": "number" },
@@ -72,6 +75,24 @@
         "timestamp": { "type": "string" }
       },
       "required": ["id", "userId", "tiempo_minutos", "nivel_resistencia"]
+    },
+    "strength_session": {
+      "title": "StrengthSession",
+      "description": "Registro de serie o entrenamiento de fuerza en casa",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "fecha": { "type": "string", "description": "Fecha del entrenamiento en formato YYYY-MM-DD" },
+        "nombre_ejercicio": { "type": "string" },
+        "series_completadas": { "type": "number" },
+        "repeticiones_completadas": { "type": "number" },
+        "repeticiones_objetivo": { "type": "number" },
+        "cadencia_tempo": { "type": "string" },
+        "tiempo_segundos": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "userId", "fecha", "nombre_ejercicio", "repeticiones_completadas"]
     }
   },
   "firestore": {
@@ -90,6 +111,10 @@
     "/users/{userId}/elliptical_sessions/{sessionId}": {
       "schema": "elliptical_session",
       "description": "Histórico de elíptica"
+    },
+    "/users/{userId}/strength_sessions/{sessionId}": {
+      "schema": "strength_session",
+      "description": "Histórico de entrenamientos de fuerza"
     }
   }
 }
